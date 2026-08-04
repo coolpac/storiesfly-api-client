@@ -1,0 +1,60 @@
+{
+  "name": "storiesfly",
+  "version": "0.1.0",
+  "description": "TypeScript client for the StoriesFly API: Instagram stories, profiles, highlights, media URLs, shadow ban checks and follower/unfollower tracking.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coolpac/storiesfly-api-client.git"
+  },
+  "homepage": "https://storiesfly.com/developers",
+  "bugs": {
+    "url": "https://github.com/coolpac/storiesfly-api-client/issues"
+  },
+  "keywords": [
+    "instagram",
+    "instagram-api",
+    "stories",
+    "instagram-stories",
+    "unfollowers",
+    "follower-tracker",
+    "instagram-analytics",
+    "shadowban",
+    "telegram-mini-app",
+    "api-client",
+    "typescript"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist test-build",
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test test-build/test/*.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "prepack": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.2"
+  }
+}

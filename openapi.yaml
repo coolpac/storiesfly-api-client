@@ -1,0 +1,1520 @@
+openapi: 3.1.0
+
+info:
+  title: StoriesFly API
+  version: "1.0.0"
+  summary: Read-only HTTP API for public Instagram stories, profiles, media and follower-activity tracking.
+  description: |
+    The StoriesFly API exposes the data-collection layer behind storiesfly.com as a plain
+    HTTP+JSON interface. It covers three areas:
+
+    * **content** — fetch active stories, cached profile metadata, highlight items and the
+      direct CDN URLs behind posts/reels/carousels, plus a proxy that streams those CDN
+      objects back as bytes.
+    * **analytics** — shadow-ban signal analysis for any public account, and outbound
+      engagement (where a tracked account leaves likes and comments).
+    * **tracker** — server-side monitoring of accounts you register, producing a
+      chronological activity log of follows, unfollows, follower gains/losses and story posts.
+
+    Only public Instagram accounts are supported. Private accounts return either an error or a
+    profile record with `isPrivate: true` and no story/media payload.
+
+    ## Authentication
+
+    Send your key in the `X-Api-Key` header. Most endpoints also accept a first-party
+    `Authorization: Bearer <jwt>` session token; `GET /api/analytics/outbound` accepts *only*
+    the Bearer token (see that operation's description).
+
+    Presenting a credential that does not resolve (mistyped, revoked or expired) returns `401`
+    rather than falling back to an anonymous allowance, so a dead key fails loudly.
+
+    ## Rate limiting
+
+    Successful responses on the quota-metered endpoints carry `X-RateLimit-Limit`,
+    `X-RateLimit-Remaining` and `X-RateLimit-Used`. These headers are omitted when the
+    resolved limit is unlimited. `429` responses carry `Retry-After` (seconds) and, on the
+    daily-quota path, a body with `limit`, `used` and `retryAfterSec`.
+
+    Two independent limits apply to API-key traffic: a per-key burst window and a daily quota
+    derived from your plan. Per-endpoint quota bucket details are in each operation's
+    `x-rateLimit` field.
+
+    ## Errors
+
+    Every non-2xx response is `application/json` with an `error` string. Quota and entitlement
+    errors add hint fields (`upgrade`, `requiredTier`, `limit`, `used`, `retryAfterSec`).
+
+    ## CORS
+
+    All `/api/*` routes answer `OPTIONS` with `204` and send
+    `Access-Control-Allow-Origin: *` for non-first-party origins, so browser clients can call
+    the API directly with `X-Api-Key` (credentials are not allowed on that path).
+  contact:
+    name: StoriesFly API
+    url: https://storiesfly.com/developers
+  license:
+    name: Proprietary
+    url: https://storiesfly.com/terms
+
+servers:
+  - url: https://storiesfly.com
+    description: Production
+
+tags:
+  - name: content
+    description: Stories, profiles, highlights, post media and the CDN download proxy.
+  - name: analytics
+    description: Shadow-ban analysis and outbound engagement reporting.
+  - name: tracker
+    description: Register accounts for monitoring and read their activity log.
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /api/stories:
+    post:
+      operationId: getStories
+      summary: Get Instagram stories
+      tags: [content]
+      description: |
+        Fetch currently active stories for a public account. Instagram stories expire after 24
+        hours; the response contains only what is live at request time.
+
+        The response also carries the account's profile record and its highlight reels, because
+        the same upstream fetch produces all three. `fromCache` reports whether the payload was
+        served from the story cache rather than a fresh upstream fetch.
+
+        Callers authenticated with a first-party Bearer session (not an API key) may instead
+        receive the Detox-lock variant of the response: an empty `stories`/`highlights` payload
+        with `detoxLocked: true`, when the session owner has asked to have that target hidden
+        from them. API-key clients are exempt from this behaviour and never see it.
+      x-rateLimit: "Free: 25/day, Starter: 500/day, Growth: 5K/day, Scale: 50K/day. Burst: 60/min."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  minLength: 1
+                  maxLength: 30
+                  pattern: '^[a-zA-Z0-9._]+$'
+                  description: |
+                    Instagram username. Validated before normalisation, so a leading `@` or a
+                    full profile URL is rejected with 400 — pass the bare handle.
+                  examples: [instagram]
+            examples:
+              default:
+                value:
+                  username: instagram
+      responses:
+        "200":
+          description: Profile, active stories and highlight reels for the account.
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Used: { $ref: "#/components/headers/XRateLimitUsed" }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/StoriesResponse"
+                  - $ref: "#/components/schemas/StoriesDetoxLockedResponse"
+              examples:
+                stories:
+                  summary: Normal response
+                  value:
+                    profile:
+                      id: "25025320"
+                      username: instagram
+                      fullName: Instagram
+                      profilePicUrl: https://scontent.cdninstagram.com/...
+                      posts: 7503
+                      followers: 680000000
+                      following: 75
+                      isPrivate: false
+                    stories:
+                      - id: "3291847"
+                        mediaType: image
+                        source: https://scontent.cdninstagram.com/...
+                        thumbnail: https://scontent.cdninstagram.com/...
+                        takenAt: "2026-03-04T10:30:00.000Z"
+                    highlights:
+                      - id: "highlight:17901234567890123"
+                        title: Behind the scenes
+                        coverUrl: https://scontent.cdninstagram.com/...
+                    fromCache: false
+                detoxLocked:
+                  summary: Detox-locked (Bearer sessions only)
+                  value:
+                    profile:
+                      username: instagram
+                    stories: []
+                    highlights: []
+                    detoxLocked: true
+                    lockedUntil: "2026-03-11T00:00:00.000Z"
+                    streakDays: 4
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamFailure" }
+
+  /api/profile:
+    get:
+      operationId: getProfile
+      summary: Get Instagram profile
+      tags: [content]
+      description: |
+        Return profile metadata for a public account, served from a four-layer cache
+        (in-memory → Redis → database → live Instagram fetch). The `X-Cache` response header
+        reports which layer answered: `HIT-L1`, `HIT-L2`, `MISS` (database) or `MISS-LIVE`
+        (fresh upstream fetch).
+
+        Anonymous same-origin callers are metered per IP on a separate, much smaller allowance
+        than API-key callers.
+      x-rateLimit: "Free: 25/day, Starter: 500/day, Growth: 5K/day, Scale: 50K/day. Burst: 60/min."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: |
+            Instagram username. Validated before normalisation, so a leading `@` or a full
+            profile URL is rejected with 400 — pass the bare handle.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 30
+            pattern: '^[a-zA-Z0-9._]+$'
+          example: instagram
+      responses:
+        "200":
+          description: Profile record.
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Used: { $ref: "#/components/headers/XRateLimitUsed" }
+            X-Cache:
+              description: Cache layer that served the response.
+              schema:
+                type: string
+                enum: [HIT-L1, HIT-L2, MISS, MISS-LIVE]
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileResponse" }
+              examples:
+                default:
+                  value:
+                    username: instagram
+                    fullName: Instagram
+                    profilePicUrl: https://scontent.cdninstagram.com/...
+                    posts: 7503
+                    followers: 680000000
+                    following: 75
+                    isPrivate: false
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/highlights:
+    get:
+      operationId: getHighlightItems
+      summary: Get items in a highlight reel
+      tags: [content]
+      description: |
+        Fetch the media items inside one highlight reel. Highlight IDs come from the
+        `highlights` array of `POST /api/stories`. Unlike stories, highlights do not expire.
+      x-rateLimit: "Free: 25/day, Starter: 500/day, Growth: 5K/day, Scale: 50K/day. Burst: 60/min."
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: |
+            Highlight reel ID. Accepted forms are a bare numeric ID or `highlight:<digits>`;
+            underscores are permitted. Anything else is rejected with 400.
+          schema:
+            type: string
+            pattern: '^(highlight:)?[\d_]{1,64}$'
+          example: "highlight:17901234567890123"
+      responses:
+        "200":
+          description: Items in the highlight reel.
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Used: { $ref: "#/components/headers/XRateLimitUsed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HighlightItemsResponse" }
+              examples:
+                default:
+                  value:
+                    items:
+                      - id: "3291847000000001"
+                        mediaType: image
+                        source: https://scontent.cdninstagram.com/...
+                        thumbnail: https://scontent.cdninstagram.com/...
+                        takenAt: "2026-01-14T08:02:11.000Z"
+                      - id: "3291847000000002"
+                        mediaType: video
+                        source: https://scontent.cdninstagram.com/...
+                        takenAt: "2026-01-14T08:05:40.000Z"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamFailure" }
+
+  /api/media:
+    post:
+      operationId: getMedia
+      summary: Get media URLs for a post or reel
+      tags: [content]
+      description: |
+        Resolve an Instagram post, reel or carousel to its direct media URLs.
+
+        Supply either `url` or `shortcode`; at least one is required. A `url` is reduced to its
+        shortcode by matching `instagram.com/{p|reel|reels}/<shortcode>` (an optional username
+        segment is tolerated), so anything the extractor cannot parse yields a 400. Carousels
+        return one entry per slide.
+      x-rateLimit: "Free: 25/day, Starter: 500/day, Growth: 5K/day, Scale: 50K/day. Burst: 60/min."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MediaRequest" }
+            examples:
+              byUrl:
+                value:
+                  url: https://www.instagram.com/p/ABC123/
+              byShortcode:
+                value:
+                  shortcode: ABC123
+      responses:
+        "200":
+          description: Resolved media items.
+          headers:
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Used: { $ref: "#/components/headers/XRateLimitUsed" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaResponse" }
+              examples:
+                default:
+                  value:
+                    media:
+                      - type: image
+                        url: https://scontent.cdninstagram.com/...
+                        thumbnail: https://scontent.cdninstagram.com/...
+                      - type: video
+                        url: https://scontent.cdninstagram.com/...
+                        thumbnail: https://scontent.cdninstagram.com/...
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: The shortcode resolved but produced no media — the post may be private or deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: No media found. The post may be private or deleted.
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502": { $ref: "#/components/responses/UpstreamFailure" }
+
+  /api/download:
+    get:
+      operationId: downloadMedia
+      summary: Proxy-download a CDN media object
+      tags: [content]
+      description: |
+        Stream a media object back as bytes, working around the CORS restrictions and expiring
+        tokens on Instagram CDN URLs.
+
+        The host is checked against an allowlist before any fetch, and every redirect hop is
+        re-checked (maximum 5 hops). Allowed hosts are `*.cdninstagram.com`, `*.fbcdn.net`,
+        `*.instagram.com` and the exact hosts `cdn.iqsaved.com` and `pic.anonstories.org`.
+        Bare IP addresses and `localhost` are always rejected. A disallowed host returns 403;
+        an unparseable URL returns 400.
+
+        The response sets `Content-Disposition: attachment` with a generated filename, and
+        `Content-Type` is passed through from upstream (defaulting to `image/jpeg`).
+      x-rateLimit: "Free: 25/day, Starter: 500/day, Growth: 5K/day, Scale: 50K/day. Burst: 60/min."
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: Absolute media URL on an allowlisted host.
+          schema:
+            type: string
+            format: uri
+          example: https://scontent.cdninstagram.com/v/t51.../image.jpg
+      responses:
+        "200":
+          description: Binary media. `Content-Type` mirrors the upstream response.
+          headers:
+            Content-Disposition:
+              description: 'Always `attachment; filename="storiesfly_<timestamp>.<jpg|mp4>"`.'
+              schema:
+                type: string
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Used: { $ref: "#/components/headers/XRateLimitUsed" }
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Missing `url`, or the value is not a parseable URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                missing:
+                  value:
+                    error: url parameter required
+                unparseable:
+                  value:
+                    error: Invalid URL
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The URL's host is not on the download allowlist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Domain not allowed
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "502":
+          description: Upstream fetch failed, timed out, or redirected to a disallowed host.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Download failed
+
+  /api/analytics/shadowban:
+    get:
+      operationId: checkShadowban
+      summary: Shadow ban check
+      tags: [analytics]
+      description: |
+        Analyse a public account for shadow-ban signals using public data only. Returns a score
+        (0 = clean, 100 = definitely shadowbanned), a verdict, the individual weighted signals
+        and a list of recommendations.
+
+        This endpoint has no anonymous path: unauthenticated requests always receive 401.
+
+        The quota is checked and incremented **before** the username is validated, so a request
+        with a malformed username consumes one unit of the daily allowance and still returns 400.
+      x-rateLimit: "Counted as aiAnalyses. Free: 0/day, Basic: 10/day, Pro: unlimited, Enterprise: unlimited."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: Instagram username to analyse. A leading `@` is stripped before validation.
+          schema:
+            type: string
+          example: example_account
+        - name: locale
+          in: query
+          required: false
+          description: |
+            Optional BCP-47-style language code (`en`, `es`, `pt`, `ru`, `tr`, `ar`, `de`, `fr`,
+            `it`, `ja`, `ko`, `id`, `hi`, `pl`, `uk`, `th`, `vi`, `sr`). When supplied and
+            supported, signal names/descriptions and recommendations are machine-translated.
+            Unknown values and translation failures fall back silently to English.
+          schema:
+            type: string
+          example: es
+      responses:
+        "200":
+          description: Shadow ban analysis.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShadowBanResult" }
+              examples:
+                default:
+                  value:
+                    username: example_account
+                    score: 35
+                    verdict: possibly_limited
+                    signals:
+                      - name: Engagement Rate
+                        status: warning
+                        description: Below average for account size
+                        weight: 20
+                      - name: Content Reach
+                        status: critical
+                        description: Posts not appearing in explore
+                        weight: 10
+                    checkedAt: "2026-03-04T12:00:00.000Z"
+                    recommendations:
+                      - Avoid banned hashtags
+                      - Post consistently 3-5 times per week
+        "400":
+          description: Missing or malformed username.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Valid Instagram username required
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: The account could not be analysed — it may not exist or may be private.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Could not analyze this account. It may not exist or be private.
+        "429":
+          description: Daily analysis quota exhausted. No `Retry-After` header is sent on this endpoint.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Daily analysis limit reached. Upgrade for more.
+        "500":
+          description: The analysis itself threw.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Shadow ban check failed. Please try again later.
+
+  /api/tracker:
+    get:
+      operationId: getTrackerActivity
+      summary: Get tracked-account activity feed
+      tags: [tracker]
+      description: |
+        Return every account you track together with a paginated, reverse-chronological
+        activity log covering all of them.
+
+        Consecutive duplicate `FOLLOW`, `UNFOLLOW`, `FOLLOWER_ADDED` and `FOLLOWER_REMOVED`
+        entries for the same `(igUsername, activityType, targetUsername)` are collapsed to the
+        most recent one *after* the page is read, so a page can return fewer than `limit`
+        items while `total` still counts the raw rows.
+
+        Requires a paid web subscription (Basic/Pro) or a Tracker API plan; otherwise 403.
+      x-rateLimit: "Tracker Starter: 100/day (1 account), Growth: 500/day (5 accounts), Scale: 5K/day (10 accounts)."
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: 1-based page number.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Items per page.
+          schema:
+            type: integer
+            minimum: 20
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: Tracked accounts plus one page of activity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerActivityResponse" }
+              examples:
+                default:
+                  value:
+                    accounts:
+                      - id: cm9x2k4t50001abcdefghijkl
+                        userId: cm9x2k4t50000abcdefghijkl
+                        igUsername: target_account
+                        igUserId: "1234567890"
+                        initialFollowers: 15420
+                        initialFollowing: 892
+                        storyOnly: false
+                        trackLikes: false
+                        trackFollows: true
+                        trackFollowers: true
+                        trackStories: true
+                        notifyNewStory: true
+                        syncStatus: READY
+                        syncRetries: 0
+                        lastPolledAt: "2026-03-04T12:00:00.000Z"
+                        lastDiffAt: "2026-03-04T11:00:00.000Z"
+                        lastStoryPolledAt: "2026-03-04T08:35:00.000Z"
+                        createdAt: "2026-02-01T09:12:00.000Z"
+                        deepAnalytics: null
+                    activities:
+                      - id: cm9x9zz1u0007abcdefghijkl
+                        igUsername: target_account
+                        activityType: FOLLOW
+                        targetUsername: new_friend
+                        targetPostId: null
+                        details: null
+                        detectedAt: "2026-03-04T11:30:00.000Z"
+                      - id: cm9x9zz1u0008abcdefghijkl
+                        igUsername: target_account
+                        activityType: FOLLOWER_REMOVED
+                        targetUsername: former_fan
+                        targetPostId: null
+                        details: null
+                        detectedAt: "2026-03-04T10:15:00.000Z"
+                    total: 482
+                    page: 1
+                    pages: 3
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TrackerForbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/tracker/accounts:
+    get:
+      operationId: listTrackedAccounts
+      summary: List tracked accounts
+      tags: [tracker]
+      description: |
+        List the accounts registered for tracking, newest first. This projection is narrower
+        than the `accounts` array returned by `GET /api/tracker`: it omits `userId`,
+        `trackLikes`, `syncRetries`, `lastDiffAt` and the Deep Analytics relation.
+      x-rateLimit: "Tracker Starter: 1 account max, Growth: 5 accounts, Scale: 10 accounts. Adds limited to 2-10/day depending on tier."
+      responses:
+        "200":
+          description: Tracked accounts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackedAccountListResponse" }
+              examples:
+                default:
+                  value:
+                    accounts:
+                      - id: cm9x2k4t50001abcdefghijkl
+                        igUsername: instagram
+                        igUserId: "25025320"
+                        initialFollowers: 680000000
+                        initialFollowing: 75
+                        storyOnly: false
+                        trackFollows: true
+                        trackFollowers: true
+                        trackStories: true
+                        notifyNewStory: true
+                        syncStatus: READY
+                        lastPolledAt: "2026-03-04T12:00:00.000Z"
+                        lastStoryPolledAt: "2026-03-04T08:35:00.000Z"
+                        createdAt: "2026-02-01T09:12:00.000Z"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TrackerForbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+    post:
+      operationId: addTrackedAccount
+      summary: Add an account to track
+      tags: [tracker]
+      description: |
+        Register a public Instagram account for tracking. The created record is returned
+        **unwrapped** — a single account object, not an `accounts` array.
+
+        Full-tracking accounts are created with `syncStatus: "PENDING"` and their initial
+        follower/following snapshots are taken in the background; poll
+        `GET /api/tracker/accounts` until `syncStatus` becomes `READY` before expecting
+        activity.
+
+        Rejections that arrive as 400 include: the account is already tracked, the account does
+        not exist or is private, the account exceeds the trackable follower ceiling, and the
+        daily add limit is exhausted. Exceeding the *account count* limit for your plan is 403.
+      x-rateLimit: "Tracker Starter: 1 account max, Growth: 5 accounts, Scale: 10 accounts. Adds limited to 2-10/day depending on tier."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [igUsername]
+              properties:
+                igUsername:
+                  type: string
+                  minLength: 1
+                  maxLength: 30
+                  pattern: '^[a-zA-Z0-9._]+$'
+                  description: Bare Instagram handle of a public account.
+            examples:
+              default:
+                value:
+                  igUsername: instagram
+      responses:
+        "200":
+          description: The newly created tracked-account record.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackedAccount" }
+              examples:
+                default:
+                  value:
+                    id: cm9x2k4t50001abcdefghijkl
+                    userId: cm9x2k4t50000abcdefghijkl
+                    igUsername: instagram
+                    igUserId: "25025320"
+                    initialFollowers: 680000000
+                    initialFollowing: 75
+                    storyOnly: false
+                    trackLikes: false
+                    trackFollows: true
+                    trackFollowers: true
+                    trackStories: true
+                    notifyNewStory: true
+                    syncStatus: PENDING
+                    syncRetries: 0
+                    lastPolledAt: null
+                    lastDiffAt: null
+                    lastStoryPolledAt: null
+                    createdAt: "2026-03-04T12:00:00.000Z"
+        "400":
+          description: Invalid body, duplicate account, private/nonexistent target, follower ceiling exceeded, or daily add limit reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                duplicate:
+                  value:
+                    error: "@instagram is already being tracked"
+                private:
+                  value:
+                    error: "@example is a private account. Only public accounts can be tracked."
+                dailyAdds:
+                  value:
+                    error: Daily add limit reached. You can add more tracked accounts tomorrow.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: |
+            No tracker entitlement, or the plan's tracked-account ceiling is already reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                noEntitlement:
+                  value:
+                    error: Activity Tracker requires web subscription (Basic/Pro) or Tracker API plan
+                    upgrade: true
+                limitReached:
+                  value:
+                    error: Account tracking limit reached. Upgrade your plan.
+                    upgrade: true
+                    requiredTier: PRO
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+    delete:
+      operationId: removeTrackedAccount
+      summary: Stop tracking an account
+      tags: [tracker]
+      description: |
+        Remove a tracked account. Historical activity rows are retained; no new events are
+        detected.
+
+        The account ID may be given as the `accountId` query parameter or in a JSON body
+        (`{"accountId": "..."}`) — the query parameter wins when both are present. The body is
+        read unconditionally, so send `Content-Type: application/json` with a valid body or no
+        body at all.
+      x-rateLimit: "Tracker Starter: 1 account max, Growth: 5 accounts, Scale: 10 accounts. Adds limited to 2-10/day depending on tier."
+      parameters:
+        - name: accountId
+          in: query
+          required: false
+          description: Tracked-account ID (CUID). Required unless supplied in the request body.
+          schema: { $ref: "#/components/schemas/TrackedAccountId" }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accountId: { $ref: "#/components/schemas/TrackedAccountId" }
+            examples:
+              default:
+                value:
+                  accountId: cm9x2k4t50001abcdefghijkl
+      responses:
+        "200":
+          description: Account removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                required: [success]
+              examples:
+                default:
+                  value:
+                    success: true
+        "400":
+          description: Missing or malformed account ID.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Valid account ID required
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/TrackerForbidden" }
+        "404":
+          description: No such tracked account for this user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Not found
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/analytics/outbound:
+    get:
+      operationId: getOutboundEngagement
+      summary: Outbound engagement analytics
+      tags: [analytics]
+      description: |
+        Report where a tracked account leaves likes and comments: totals for the window, the
+        top 15 targets by combined interactions, and up to 50 recent interaction events.
+
+        **Authentication differs from every other endpoint on this API.** This route resolves
+        the caller with the Bearer-only helper, so `X-Api-Key` is not accepted here and an
+        API-key request receives `401 {"error":"Unauthorized"}`. Send
+        `Authorization: Bearer <jwt>`. An expired token yields
+        `401 {"error":"Session expired. Please log in again.","code":"SESSION_EXPIRED"}`.
+
+        Entitlement is checked against the caller's **web** tier (PRO or ENTERPRISE) and the
+        target account must be one you already track with an active Deep Analytics addon.
+      x-rateLimit: "Requires PRO+ subscription and active Deep Analytics addon ($4/mo per account)."
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: A username you already track. A leading `@` is stripped before validation.
+          schema:
+            type: string
+          example: example
+        - name: days
+          in: query
+          required: false
+          description: |
+            Look-back window in days. Clamped to 1–90; a non-numeric or zero value falls back
+            to 30 rather than erroring.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+      responses:
+        "200":
+          description: Outbound engagement summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OutboundEngagementResponse" }
+              examples:
+                default:
+                  value:
+                    username: example
+                    days: 30
+                    totalLikes: 156
+                    totalComments: 23
+                    topTargets:
+                      - username: close_friend
+                        likes: 45
+                        comments: 12
+                      - username: favorite_brand
+                        likes: 28
+                        comments: 5
+                    recentActivity:
+                      - type: like
+                        targetUsername: close_friend
+                        targetPostId: post_123
+                        details: {}
+                        detectedAt: "2026-03-04T11:00:00.000Z"
+        "400":
+          description: Missing or malformed username.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Valid username required
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Caller is not on a Pro-or-higher web tier, or the account has no active Deep Analytics addon.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                notPro:
+                  value:
+                    error: Outbound analytics requires Pro subscription
+                    upgrade: true
+                    requiredTier: PRO
+                noAddon:
+                  value:
+                    error: Deep Analytics addon required for outbound engagement
+                    upgrade: true
+        "404":
+          description: The username is not one of your tracked accounts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                default:
+                  value:
+                    error: Account not tracked
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: API key issued at https://storiesfly.com/developers.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        First-party session token. Accepted alongside `X-Api-Key` on most endpoints and is the
+        only accepted credential on `GET /api/analytics/outbound`.
+
+  headers:
+    XRateLimitLimit:
+      description: Daily quota for the resolved plan. Omitted when the quota is unlimited.
+      required: false
+      schema:
+        type: integer
+    XRateLimitRemaining:
+      description: Remaining calls in the current daily window. Omitted when the quota is unlimited.
+      required: false
+      schema:
+        type: integer
+    XRateLimitUsed:
+      description: Calls consumed in the current daily window. Omitted when the quota is unlimited.
+      required: false
+      schema:
+        type: integer
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      required: false
+      schema:
+        type: integer
+
+  responses:
+    BadRequest:
+      description: Request validation failed. The `error` string is the first validation message.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            invalidUsername:
+              value:
+                error: Invalid username format
+            invalidJson:
+              value:
+                error: Invalid JSON body
+
+    Unauthorized:
+      description: |
+        No usable credential. Returned when a credential was presented but did not resolve
+        (invalid, revoked or expired), and when an off-site caller presents none at all.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            invalidKey:
+              value:
+                error: Invalid or revoked API key
+            missingKey:
+              value:
+                error: API key required. Get one at /developers
+            generic:
+              value:
+                error: Unauthorized
+            sessionExpired:
+              value:
+                error: Session expired. Please log in again.
+                code: SESSION_EXPIRED
+
+    TrackerForbidden:
+      description: The account has no tracker entitlement (needs a Basic/Pro web subscription or a Tracker API plan).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            default:
+              value:
+                error: Activity Tracker requires web subscription (Basic/Pro) or Tracker API plan
+                upgrade: true
+
+    NotFound:
+      description: The requested resource could not be found or resolved.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            default:
+              value:
+                error: Not found
+
+    TooManyRequests:
+      description: |
+        Burst window or daily quota exceeded. Burst rejections carry `Retry-After` when a
+        retry delay is known; daily-quota rejections carry `Retry-After: 3600` and a body with
+        `limit`, `used` and `retryAfterSec`.
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            burst:
+              value:
+                error: Burst limit exceeded. Try again later.
+                retryAfterSec: 60
+            dailyQuota:
+              value:
+                error: Daily limit reached. Upgrade for unlimited access.
+                upgrade: true
+                limit: 500
+                used: 500
+                retryAfterSec: 3600
+            dailyApiQuota:
+              value:
+                error: Daily API limit reached. Upgrade your plan.
+
+    UpstreamFailure:
+      description: The upstream Instagram fetch failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            default:
+              value:
+                error: Failed to fetch stories
+
+  schemas:
+    Error:
+      type: object
+      description: |
+        Uniform error envelope. `error` is always present; the remaining fields appear only on
+        the quota and entitlement paths that set them.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable message. Not a stable machine identifier.
+        code:
+          type: string
+          description: Present only on the expired-session 401 (`SESSION_EXPIRED`).
+        upgrade:
+          type: boolean
+          description: Present on quota and entitlement errors that a paid plan would clear.
+        requiredTier:
+          type: string
+          description: Minimum tier that would clear the error, when the handler names one.
+        limit:
+          type: integer
+          description: Daily quota for the resolved plan, on daily-quota 429s.
+        used:
+          type: integer
+          description: Calls consumed today, on daily-quota 429s.
+        retryAfterSec:
+          type: integer
+          description: Suggested retry delay in seconds.
+      additionalProperties: true
+
+    IgProfile:
+      type: object
+      description: Instagram profile as returned inside the stories payload.
+      properties:
+        id:
+          type: string
+          description: Instagram numeric user ID. Empty string when the cache row has no ID.
+        username:
+          type: string
+        fullName:
+          type: string
+        profilePicUrl:
+          type: string
+        posts:
+          type: integer
+        followers:
+          type: integer
+        following:
+          type: integer
+        isPrivate:
+          type: boolean
+        bio:
+          type: string
+          description: Present only when the upstream/cache record carried one.
+      required: [id, username, fullName, profilePicUrl, posts, followers, following, isPrivate]
+
+    IgStory:
+      type: object
+      properties:
+        id:
+          type: string
+        mediaType:
+          type: string
+          enum: [image, video]
+        source:
+          type: string
+          description: Direct media URL. Pass it to `GET /api/download` to fetch the bytes.
+        thumbnail:
+          type: string
+        takenAt:
+          type: string
+          description: ISO-8601 timestamp.
+        expired:
+          type: boolean
+          description: True when the locally stored copy was lost and the CDN URL is older than 24h.
+      required: [id, mediaType, source, takenAt]
+
+    IgHighlight:
+      type: object
+      description: A highlight reel. Pass `id` to `GET /api/highlights`.
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        coverUrl:
+          type: string
+      required: [id, title, coverUrl]
+
+    IgHighlightItem:
+      type: object
+      properties:
+        id:
+          type: string
+        mediaType:
+          type: string
+          enum: [image, video]
+        source:
+          type: string
+        thumbnail:
+          type: string
+        takenAt:
+          type: string
+          description: ISO-8601 timestamp.
+      required: [id, mediaType, source, takenAt]
+
+    StoriesResponse:
+      type: object
+      properties:
+        profile: { $ref: "#/components/schemas/IgProfile" }
+        stories:
+          type: array
+          items: { $ref: "#/components/schemas/IgStory" }
+        highlights:
+          type: array
+          items: { $ref: "#/components/schemas/IgHighlight" }
+        fromCache:
+          type: boolean
+          description: True when the payload came from the story cache rather than a fresh fetch.
+      required: [profile, stories, highlights, fromCache]
+
+    StoriesDetoxLockedResponse:
+      type: object
+      description: |
+        Returned instead of `StoriesResponse` when the caller is authenticated with a
+        first-party Bearer session that has an active Detox lock on the requested target.
+        API-key callers never receive this shape.
+      properties:
+        profile:
+          type: object
+          properties:
+            username:
+              type: string
+          required: [username]
+        stories:
+          type: array
+          maxItems: 0
+          items: { $ref: "#/components/schemas/IgStory" }
+        highlights:
+          type: array
+          maxItems: 0
+          items: { $ref: "#/components/schemas/IgHighlight" }
+        detoxLocked:
+          type: boolean
+          const: true
+        lockedUntil:
+          type: string
+          description: ISO-8601 timestamp when the lock lifts.
+        streakDays:
+          type: integer
+      required: [profile, stories, highlights, detoxLocked]
+
+    ProfileResponse:
+      type: object
+      description: |
+        Cached profile projection. Note that `bio` is stored server-side but is **not** part of
+        this projection.
+      properties:
+        username:
+          type: string
+        fullName:
+          type: [string, "null"]
+        profilePicUrl:
+          type: [string, "null"]
+        posts:
+          type: integer
+        followers:
+          type: integer
+        following:
+          type: integer
+        isPrivate:
+          type: boolean
+      required: [username, fullName, profilePicUrl, posts, followers, following, isPrivate]
+
+    HighlightItemsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/IgHighlightItem" }
+      required: [items]
+
+    MediaRequest:
+      type: object
+      description: Provide `url` or `shortcode`; at least one is required.
+      properties:
+        url:
+          type: string
+          maxLength: 500
+          description: Instagram post or reel URL, e.g. `https://www.instagram.com/p/ABC123/`.
+        shortcode:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: Post shortcode. Takes precedence over `url` when both are supplied.
+      anyOf:
+        - required: [url]
+        - required: [shortcode]
+
+    MediaItem:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [image, video]
+        url:
+          type: string
+        thumbnail:
+          type: string
+          description: Omitted when upstream supplied no display or thumbnail source.
+      required: [type, url]
+
+    MediaResponse:
+      type: object
+      properties:
+        media:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/MediaItem" }
+      required: [media]
+
+    ShadowBanSignal:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ok, warning, critical]
+        description:
+          type: string
+        weight:
+          type: integer
+      required: [name, status, description, weight]
+
+    ShadowBanResult:
+      type: object
+      properties:
+        username:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 0 = clean, 100 = definitely shadowbanned.
+        verdict:
+          type: string
+          enum: [clean, possibly_limited, likely_shadowbanned]
+        signals:
+          type: array
+          items: { $ref: "#/components/schemas/ShadowBanSignal" }
+        checkedAt:
+          type: string
+          description: ISO-8601 timestamp.
+        recommendations:
+          type: array
+          items:
+            type: string
+      required: [username, score, verdict, signals, checkedAt, recommendations]
+
+    TrackedAccountId:
+      type: string
+      minLength: 20
+      maxLength: 30
+      pattern: '^c[a-z0-9]+$'
+      description: Tracked-account identifier (CUID).
+
+    TrackerSyncStatus:
+      type: string
+      enum: [PENDING, SYNCING, READY, FAILED]
+      description: |
+        `PENDING` — waiting for the initial follower/following snapshots;
+        `SYNCING` — snapshots in progress; `READY` — normal tracking; `FAILED` — sync gave up.
+
+    TrackedAccount:
+      type: object
+      description: Full tracked-account record, as returned by `POST /api/tracker/accounts`.
+      properties:
+        id: { $ref: "#/components/schemas/TrackedAccountId" }
+        userId:
+          type: string
+        igUsername:
+          type: string
+        igUserId:
+          type: [string, "null"]
+        initialFollowers:
+          type: [integer, "null"]
+          description: Follower count captured when tracking started. There is no live follower field on this record.
+        initialFollowing:
+          type: [integer, "null"]
+          description: Following count captured when tracking started.
+        storyOnly:
+          type: boolean
+        trackLikes:
+          type: boolean
+        trackFollows:
+          type: boolean
+        trackFollowers:
+          type: boolean
+        trackStories:
+          type: boolean
+        notifyNewStory:
+          type: boolean
+        syncStatus: { $ref: "#/components/schemas/TrackerSyncStatus" }
+        syncRetries:
+          type: integer
+        lastPolledAt:
+          type: [string, "null"]
+          description: ISO-8601 timestamp of the last profile poll.
+        lastDiffAt:
+          type: [string, "null"]
+          description: ISO-8601 timestamp of the last heavy follower/following list diff.
+        lastStoryPolledAt:
+          type: [string, "null"]
+          description: ISO-8601 timestamp of the last story poll.
+        createdAt:
+          type: string
+          description: ISO-8601 timestamp.
+      required: [id, userId, igUsername, storyOnly, syncStatus, createdAt]
+
+    TrackedAccountSummary:
+      type: object
+      description: |
+        Projection returned by `GET /api/tracker/accounts`. Narrower than `TrackedAccount`:
+        no `userId`, `trackLikes`, `syncRetries` or `lastDiffAt`.
+      properties:
+        id: { $ref: "#/components/schemas/TrackedAccountId" }
+        igUsername:
+          type: string
+        igUserId:
+          type: [string, "null"]
+        initialFollowers:
+          type: [integer, "null"]
+        initialFollowing:
+          type: [integer, "null"]
+        storyOnly:
+          type: boolean
+        trackFollows:
+          type: boolean
+        trackFollowers:
+          type: boolean
+        trackStories:
+          type: boolean
+        notifyNewStory:
+          type: boolean
+        syncStatus: { $ref: "#/components/schemas/TrackerSyncStatus" }
+        lastPolledAt:
+          type: [string, "null"]
+        lastStoryPolledAt:
+          type: [string, "null"]
+        createdAt:
+          type: string
+      required: [id, igUsername, storyOnly, syncStatus, createdAt]
+
+    TrackedAccountListResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/TrackedAccountSummary" }
+      required: [accounts]
+
+    ActivityType:
+      type: string
+      enum:
+        - LIKE
+        - COMMENT
+        - FOLLOW
+        - UNFOLLOW
+        - STORY_POST
+        - FOLLOWER_ADDED
+        - FOLLOWER_REMOVED
+        - OUTBOUND_LIKE
+        - OUTBOUND_COMMENT
+
+    ActivityLogEntry:
+      type: object
+      description: |
+        One detected event. The discriminating field is `activityType`. `igUsername` is the
+        tracked account; `targetUsername` is the other party, where applicable.
+      properties:
+        id:
+          type: string
+        igUsername:
+          type: string
+        activityType: { $ref: "#/components/schemas/ActivityType" }
+        targetUsername:
+          type: [string, "null"]
+        targetPostId:
+          type: [string, "null"]
+        details:
+          description: Free-form JSON payload attached by the detector. May be null.
+        detectedAt:
+          type: string
+          description: ISO-8601 timestamp.
+      required: [id, igUsername, activityType, detectedAt]
+
+    TrackerActivityResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          description: |
+            Every tracked account for the caller, each with its `deepAnalytics` relation
+            (`active`, `trialEndsAt`, `endsAt`) or `null`.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/TrackedAccount"
+              - type: object
+                properties:
+                  deepAnalytics:
+                    type: [object, "null"]
+                    properties:
+                      active:
+                        type: boolean
+                      trialEndsAt:
+                        type: [string, "null"]
+                      endsAt:
+                        type: [string, "null"]
+        activities:
+          type: array
+          items: { $ref: "#/components/schemas/ActivityLogEntry" }
+        total:
+          type: integer
+          description: Total rows matching the query before de-duplication.
+        page:
+          type: integer
+        pages:
+          type: integer
+          description: Page count derived from `total` and `limit`; at least 1.
+      required: [accounts, activities, total, page, pages]
+
+    OutboundTarget:
+      type: object
+      properties:
+        username:
+          type: string
+        likes:
+          type: integer
+        comments:
+          type: integer
+      required: [username, likes, comments]
+
+    OutboundActivity:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [like, comment]
+        targetUsername:
+          type: string
+          description: Empty string when the source row had none.
+        targetPostId:
+          type: string
+          description: Empty string when the source row had none.
+        details:
+          type: object
+          description: Free-form payload attached by the detector; `{}` when absent.
+          additionalProperties: true
+        detectedAt:
+          type: string
+          description: ISO-8601 timestamp.
+      required: [type, targetUsername, targetPostId, details, detectedAt]
+
+    OutboundEngagementResponse:
+      type: object
+      properties:
+        username:
+          type: string
+        days:
+          type: integer
+          description: Effective look-back window after clamping to 1–90.
+        totalLikes:
+          type: integer
+        totalComments:
+          type: integer
+        topTargets:
+          type: array
+          maxItems: 15
+          items: { $ref: "#/components/schemas/OutboundTarget" }
+        recentActivity:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/OutboundActivity" }
+      required: [username, days, totalLikes, totalComments, topTargets, recentActivity]
