@@ -10,3 +10,6 @@ test-build/
 .DS_Store
 *.log
 npm-debug.log*
+
+# Never let a registry token reach the repo.
+.npmrc
