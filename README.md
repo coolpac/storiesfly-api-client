@@ -3,7 +3,9 @@
 [![CI](https://github.com/coolpac/storiesfly-api-client/actions/workflows/ci.yml/badge.svg)](https://github.com/coolpac/storiesfly-api-client/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/storiesfly.svg)](https://www.npmjs.com/package/storiesfly)
 
-TypeScript client for the [StoriesFly](https://storiesfly.com) HTTP API — public Instagram stories, profiles, highlights, post media, shadow ban checks and follower/unfollower tracking.
+TypeScript client for the [StoriesFly API](https://storiesfly.com/developers). It reads public Instagram data over HTTP: profiles, stories, highlights, posts, reels, comments, followers, hashtags, places and search. You do not log in to Instagram and you do not handle cookies or sessions. You send an API key and pay per request.
+
+The package has no runtime dependencies. It needs Node 18 or newer (it uses the global `fetch`), it is ESM only, and it ships its own types. The 38 data calls and the free `account` call each have a method, and every answer is typed.
 
 ## Install
 
@@ -11,203 +13,245 @@ TypeScript client for the [StoriesFly](https://storiesfly.com) HTTP API — publ
 npm install storiesfly
 ```
 
-## Quickstart
+## Get a key
 
-```js
+1. Sign in with Telegram at <https://storiesfly.com/developers/dashboard>.
+2. Create a key there. A new account gets 100 free requests, so you can try every call before you pay.
+
+Keep the key on your server. Anyone who has it can spend your balance.
+
+## Quick start
+
+The stories an account has up right now:
+
+```ts
 import { StoriesFly } from "storiesfly";
 
-const sf = new StoriesFly({ apiKey: process.env.STORIESFLY_API_KEY });
-const { profile, stories } = await sf.getStories("instagram");
-console.log(`@${profile.username} — ${stories.length} active stories`);
-```
+const client = new StoriesFly({ apiKey: process.env.STORIESFLY_API_KEY! });
 
-Node 18+. ESM only. Zero runtime dependencies — it uses the global `fetch`.
-Base URL defaults to `https://storiesfly.com` and can be overridden with `baseUrl`.
+const { user, stories } = await client.user.stories({ username: "instagram" });
 
-## Endpoints
-
-| Method | Path | Client method | Returns |
-| --- | --- | --- | --- |
-| `POST` | `/api/stories` | `getStories(username)` | `{ profile, stories, highlights, fromCache }` — the account's profile, its currently active stories, and its highlight covers |
-| `GET` | `/api/profile` | `getProfile(username)` | `{ username, fullName, profilePicUrl, posts, followers, following, isPrivate }` |
-| `GET` | `/api/highlights` | `getHighlights(id)` | `{ items }` — one entry per media item in a highlight reel |
-| `POST` | `/api/media` | `getMedia(urlOrInput)` | `{ media }` — `[{ type, url, thumbnail? }]`, one entry per carousel slide |
-| `GET` | `/api/download` | `download(url)` | `{ contentType, filename, data }` — raw bytes proxied off the Instagram CDN, not JSON |
-| `GET` | `/api/analytics/shadowban` | `checkShadowban(username)` | `{ username, score, verdict, signals, checkedAt, recommendations }` |
-| `GET` | `/api/tracker` | `getTrackerEvents({ page, limit })` | `{ accounts, activities, total, page, pages }` — tracked accounts plus a paginated activity feed |
-| `GET`/`POST`/`DELETE` | `/api/tracker/accounts` | `listTrackedAccounts()` / `addTrackedAccount(igUsername)` / `removeTrackedAccount(accountId)` | `{ accounts }` / the created account row, unwrapped / `{ success: true }` |
-| `GET` | `/api/analytics/outbound` | `getOutboundEngagement(username, { days })` | `{ username, days, totalLikes, totalComments, topTargets, recentActivity }` |
-
-### Parameter notes
-
-- **Usernames** must match `[a-zA-Z0-9._]{1,30}`. On `/api/stories`, `/api/profile` and
-  `/api/tracker/accounts` the pattern is checked *before* normalisation, so a leading `@`
-  is a `400`. The two analytics endpoints normalise first and accept `@name`.
-- **`getHighlights(id)`** — the id must match `(highlight:)?[0-9_]{1,64}`. Reel ids come back
-  from `getStories()` in the `highlights` array.
-- **`getMedia()`** — accepts a post/reel URL string, `{ url }`, or `{ shortcode }`. URLs are
-  capped at 500 characters. A link no shortcode can be extracted from returns `400`.
-- **`download(url)`** — host allowlist only: any subdomain of `cdninstagram.com`, `fbcdn.net`
-  or `instagram.com`, plus the exact hosts `cdn.iqsaved.com` and `pic.anonstories.org`.
-  Anything else is `403`; an unparseable URL is `400`.
-- **`getTrackerEvents()`** — `page` is an integer 1–100 (default 1), `limit` an integer
-  20–500 (default 200). Out-of-range values are rejected with `400`, not clamped.
-- **`removeTrackedAccount(accountId)`** — takes the tracked account's `id` (a cuid), not the
-  Instagram username.
-- **`getOutboundEngagement()`** — `days` is clamped server-side to 1–90, default 30.
-
-### Tracker specifics
-
-- A newly added account starts at `syncStatus: "PENDING"`; its first follower/following
-  snapshots run in the background, so no activity appears for it until that completes.
-- Activity rows use **`activityType`**, not `type`. Values: `LIKE`, `COMMENT`, `FOLLOW`,
-  `UNFOLLOW`, `STORY_POST`, `FOLLOWER_ADDED`, `FOLLOWER_REMOVED`, `OUTBOUND_LIKE`,
-  `OUTBOUND_COMMENT`.
-- Tracked accounts carry `initialFollowers` / `initialFollowing` — the baseline captured when
-  tracking started, not live counts. Use `getProfile()` for current numbers.
-- Only public accounts can be tracked, and there is a server-side ceiling on how many
-  followers a trackable account may have.
-
-## Authentication
-
-Create a key at **<https://storiesfly.com/developers>** and pass it to the constructor; the
-client sends it as the `X-Api-Key` header on every request.
-
-```js
-const sf = new StoriesFly({ apiKey: "sf_live_your_key_here" });
-```
-
-One key covers every endpoint — there is no separate tracker token. A key that is invalid,
-revoked or mistyped returns `401` rather than silently falling back to an anonymous
-allowance.
-
-**`getOutboundEngagement()` is the one exception.** That handler resolves auth with a
-Bearer-only helper and never reads `X-Api-Key`, so it needs a first-party session JWT:
-
-```js
-const sf = new StoriesFly({ apiKey: "...", bearerToken: process.env.STORIESFLY_JWT });
-```
-
-The token is sent only on that call, so it cannot change which credential the other
-endpoints resolve.
-
-### Errors
-
-Every non-2xx response throws `StoriesFlyError`, carrying `status`, the parsed `body`, the
-request `url` and `method`, plus `rateLimit` read off the response headers. It exposes
-`isRateLimited`, `retryAfterSec` and `requiresUpgrade` helpers.
-
-```js
-import { StoriesFly, StoriesFlyError } from "storiesfly";
-
-try {
-  await sf.getStories("instagram");
-} catch (err) {
-  if (err instanceof StoriesFlyError && err.isRateLimited) {
-    console.log(`retry in ${err.retryAfterSec}s`);
-  }
+console.log(`${stories.length} stories up from account ${user.id}`);
+for (const story of stories) {
+  console.log(story.media_type, story.taken_at_iso, story.media_url);
 }
 ```
 
-| Status | Meaning |
-| --- | --- |
-| `400` | Malformed parameter (bad username, unparseable post URL, out-of-range `page`/`limit`) |
-| `401` | Missing, invalid or revoked credentials |
-| `403` | Plan does not cover the endpoint, tier limit reached (`requiresUpgrade`), or a download host outside the allowlist |
-| `404` | Account, post or tracked account not found |
-| `429` | Burst or daily quota exhausted — honour `retryAfterSec` |
-| `502` | Upstream Instagram fetch failed; retry later |
+Things to know:
 
-## Rate limits
+- An account is named by `{ username }` or `{ id }`, never both. A post is named by `{ url }`, `{ code }` or `{ id }`. The types enforce this.
+- Ids are strings. Instagram ids pass 2^53, and a JSON number would round them.
+- Field names are `snake_case`, as the API sends them. A value the answer does not carry is `null`. It is never `0` or `""`.
+- Media links in answers are signed Instagram CDN links. They expire within days, so download what you need soon.
 
-A burst ceiling of **60 requests/minute** applies on top of the daily quotas below.
+### Options
 
-Content API — `getStories`, `getProfile`, `getHighlights`, `getMedia`, `download`:
-
-| Plan | Price | Requests/day |
-| --- | --- | --- |
-| DEV | Free | 25 |
-| Starter | $9.99/mo | 500 |
-| Growth | $29.99/mo | 5,000 |
-| Scale | $99/mo | 50,000 |
-
-Tracker API — `getTrackerEvents`, `listTrackedAccounts`, `addTrackedAccount`, `removeTrackedAccount`:
-
-| Plan | Price | Requests/day | Tracked accounts |
-| --- | --- | --- | --- |
-| Tracker Starter | $4.99/mo | 100 | 1 |
-| Tracker Growth | $14.99/mo | 500 | 5 |
-| Tracker Scale | $49/mo | 5,000 | 10 |
-
-Content and Tracker are sold separately: a Content plan does not grant tracker access, and a
-Tracker plan does not grant content access. Web subscriptions (Basic $4.99, Pro $19.99)
-include tracker access; Pro additionally includes 5,000 content requests/day.
-
-Two endpoints are metered differently:
-
-- **`checkShadowban()`** draws on a separate analysis quota: 0/day on free and DEV keys,
-  10/day on Basic, unlimited on Pro and Enterprise. A DEV key therefore gets `429` on its
-  first call.
-- **`getOutboundEngagement()`** additionally requires a Pro-or-higher subscription, the
-  target to be one of your tracked accounts, and an active Deep Analytics add-on on that
-  account.
-
-Content endpoints report remaining quota via `X-RateLimit-*` headers; the tracker and
-analytics endpoints do not set them, so `rateLimit` fields are optional throughout.
-
-## Docs vs. handler
-
-Response types in this package were read off the route handlers, which in several places
-disagree with the examples published at `/developers/docs`. Where they differ, this client
-follows the handler:
-
-- **`POST /api/stories`** returns `{ profile, stories, highlights, fromCache }`. The published
-  example shows `{ username, items[] }`, which no code path produces.
-- **`GET /api/profile`** does not return `bio`. It is cached server-side but left out of the
-  response object the handler assembles.
-- **`GET /api/tracker`** returns `{ accounts, activities, total, page, pages }`. The published
-  example omits the three pagination fields, calls the event kind `type` (it is
-  `activityType`), and shows `followers` / `following` on tracked accounts — those fields do
-  not exist; the row has `initialFollowers` / `initialFollowing`.
-- **`POST /api/tracker/accounts`** returns the created account row unwrapped, not
-  `{ accounts: [...] }`.
-- **`DELETE /api/tracker/accounts`** validates `accountId` as a cuid (`^c[a-z0-9]+$`, 20–30
-  chars). The `acc_123` shown in the published curl example returns `400`.
-- **`GET /api/analytics/outbound`** reads `Authorization: Bearer` only and ignores
-  `X-Api-Key`; pass `bearerToken` to the client for this one endpoint.
-- **`GET /api/download`** also allows the exact hosts `cdn.iqsaved.com` and
-  `pic.anonstories.org` beyond the three Instagram CDN domains listed in the docs.
-- **`GET /api/analytics/shadowban`** accepts an undocumented `locale` query parameter that
-  translates signal text and recommendations.
-- **`GET /api/highlights`** returns `takenAt` on each item, which the published example omits.
-
-## Examples
-
-- [`examples/stories.mjs`](examples/stories.mjs) — fetch the active stories for a public account.
-- [`examples/unfollowers.mjs`](examples/unfollowers.mjs) — list tracker events and print follow/unfollow changes.
-
-```sh
-npm install && npm run build
-export STORIESFLY_API_KEY=sf_live_your_key_here
-node examples/stories.mjs instagram
+```ts
+new StoriesFly({
+  apiKey: "...",       // required, sent as X-Api-Key
+  baseUrl: "...",      // default https://storiesfly.com/api/v1
+  fetch: myFetch,      // default: the global fetch
+  timeoutMs: 60_000,   // per attempt; 0 turns the timeout off
+  maxRetries: 2,       // for rate_limited answers; 0 turns retries off
+});
 ```
 
-## What this is not
+Every call also takes a last argument with `signal` (an `AbortSignal`), `timeoutMs`, `maxRetries` and `withMeta`.
 
-- **Not a scraper.** This package makes HTTP calls to StoriesFly's hosted API. It does not
-  talk to Instagram, and nothing in it works standalone or offline.
-- **Not usable without a key.** Anonymous access exists only for same-origin browser
-  requests from storiesfly.com; scripted callers without a key get `401`.
-- **Not a way into private accounts.** Every endpoint operates on publicly visible data.
-  Private accounts return an error or empty data, and tracking one is refused.
-- **Not an official Instagram or Meta product,** and not affiliated with or endorsed by them.
+## Paging
 
-## Documentation
+A call that returns a list returns one page, with `next_cursor` and `has_more`. `client.paginate` follows the list for you. It is an async iterator that calls the method, yields the page, then calls it again with the `next_cursor` of the page before, until `has_more` is `false`:
 
-- API reference: <https://storiesfly.com/developers/docs>
-- Get an API key: <https://storiesfly.com/developers>
-- Plans and quotas: <https://storiesfly.com/developers/tiers>
+```ts
+for await (const page of client.paginate(client.user.followers, { username: "instagram" }, { maxPages: 4 })) {
+  for (const follower of page.users) console.log(follower.username);
+}
+```
+
+- Every page is one call and is charged as one. A large account has many pages, so set `maxPages` unless you mean to read the whole list.
+- `paginate` takes the method itself (`client.user.followers`), its parameters, and options: `maxPages`, `signal` and `withMeta`. A `cursor` in the parameters starts the walk from a page you already have.
+- Only methods that take `cursor` can be paginated, and the compiler refuses the rest. The `Paged` column of the [methods table](#methods) marks them, and `ENDPOINTS` (exported) has a `paged` flag on each.
+- To page by hand, pass `next_cursor` back as `cursor` and keep every other parameter the same. A cursor is opaque. A cursor the API did not return gives `bad_request`.
+- Page size follows Instagram: `user.posts` returns up to 9 items, `user.followers` and `user.following` up to 25, and the rest vary.
+
+## What a call cost: response meta
+
+A call resolves to the parsed body. To see the billing headers too, pass `{ withMeta: true }` as the last argument and the call resolves to `{ data, meta }`:
+
+```ts
+const { data, meta } = await client.user.profile({ username: "instagram" }, { withMeta: true });
+
+console.log(data.followers);
+console.log(meta.unitsCharged, meta.balanceRemaining, meta.freeUnitsRemaining);
+```
+
+| `meta` field | Header | Meaning |
+| --- | --- | --- |
+| `status` | | The HTTP status. |
+| `requestId` | `X-Request-Id` | The id of the call. Quote it when you write to support. |
+| `unitsCharged` | `X-Units-Charged` | Units this call charged. 0 when it was free or was refunded. |
+| `balanceRemaining` | `X-Balance-Remaining` | Your balance after the call, in US dollars with four decimals. A string, so no float rounds it. |
+| `freeUnitsRemaining` | `X-Free-Units-Remaining` | Free units you have left. |
+| `rateLimitLimit` | `X-RateLimit-Limit` | Requests per second your account may send. |
+| `rateLimitRemaining` | `X-RateLimit-Remaining` | Requests left in the current second. |
+
+A header the answer did not carry is `null`. The meta is returned per call and not kept on the client (there is no `lastResponse`), so calls that run at the same time cannot overwrite each other's numbers. With `paginate`, `{ withMeta: true }` yields `{ data, meta }` for each page.
+
+## Errors and what is charged
+
+Every call that does not return data throws `StoriesFlyError`. Test `code`, not `message`:
+
+```ts
+import { StoriesFly, StoriesFlyError } from "storiesfly";
+
+try {
+  await client.user.stories({ username: "some_private_account" });
+} catch (err) {
+  if (!(err instanceof StoriesFlyError)) throw err;
+
+  console.log(err.status);       // HTTP status; 0 when no answer came
+  console.log(err.code);         // "private_account"
+  console.log(err.requestId);    // quote it to support
+  console.log(err.retryAfterMs); // from Retry-After, when the API sent one
+  console.log(err.meta?.unitsCharged); // what this failed call was charged
+}
+```
+
+Other fields: `fields` (with `bad_request`, the names of the refused parameters), `linkUrl` (with `telegram_required`, the link that links your account to Telegram), `url` (the URL called; it holds no key) and `body` (the parsed error body).
+
+You are charged for answers: a `200`, `not_found` and `private_account`. A wrong parameter, a rate limit and an empty balance cost nothing, and a failure on our side or at the data source is refunded. `err.meta.unitsCharged` and `X-Units-Charged` say what a call took.
+
+| Status | `code` | Charged | When |
+| --- | --- | --- | --- |
+| 200 | | yes | The data. |
+| 404 | `not_found` | yes | Nothing was found for this request. |
+| 403 | `private_account` | yes | The call reached a private account. |
+| 400 | `bad_request` | no | A parameter is missing or invalid. `fields` names it. |
+| 401 | `unauthorized` | no | The key is missing or wrong. |
+| 402 | `credits_exhausted` | no | No credits left. Top up your balance. |
+| 403 | `telegram_required` | no | The account behind the key is not linked to Telegram. `linkUrl` has the link. |
+| 404 | `unknown_endpoint` | no | No such endpoint. |
+| 429 | `rate_limited` | no | Too many requests per second. |
+| 500 | `internal_error` | refunded | A fault on our side. |
+| 503 | `upstream_unavailable` | refunded | The data source is down for now. Try again shortly. |
+
+The client adds three codes of its own, with `status` 0 when no answer came: `timeout` (no answer within `timeoutMs`), `network_error` (`fetch` failed; the error has the `cause`) and `invalid_response` (an answer that is not in the documented shape, such as a proxy's error page; the `status` and the body are kept).
+
+### Retries
+
+- A `429` is retried up to `maxRetries` times (2 by default). The client waits for the `Retry-After` the API sent, or half a second and then longer when it sent none. A `Retry-After` longer than 30 seconds is not waited out: the error is thrown at once, with `retryAfterMs` set.
+- A `402` is never retried: another call would not change it.
+- Other errors, timeouts and network errors are not retried. A `500` or `503` is refunded, so you can retry it yourself.
+
+## Pricing
+
+From $1.50 per 1,000 requests, prepaid. See <https://storiesfly.com/developers/pricing>.
+
+One unit is one request. Every call takes 1 unit, a page of a list included. Resolving a share link takes 2, and `account` takes none. Free units are spent before your balance. Requests per second are limited per account.
+
+## Methods
+
+Each method is a call of API v1. This table is generated from the OpenAPI spec (`openapi.json`) and checked by the tests.
+
+<!-- methods:start -->
+| Call | Endpoint | Units | Paged | Returns |
+| --- | --- | --- | --- | --- |
+| `client.user.profile()` | `GET /user/profile` | 1 |  | Profile with verified badge, bio, link and counts |
+| `client.user.about()` | `GET /user/about` | 1 |  | Country, join month and former usernames |
+| `client.user.posts()` | `GET /user/posts` | 1 | yes | Posts with likes, comments, views, shares, saves and reposts |
+| `client.user.reels()` | `GET /user/reels` | 1 | yes | Reels with captions, video and play counts |
+| `client.user.tagged()` | `GET /user/tagged` | 1 | yes | Posts the account is tagged in |
+| `client.user.pinned()` | `GET /user/pinned` | 1 |  | Posts pinned to the top of the profile |
+| `client.user.stories()` | `GET /user/stories` | 1 |  | Stories live now, with the length of each video |
+| `client.user.highlights()` | `GET /user/highlights` | 1 | yes | Highlight covers and titles |
+| `client.user.followers()` | `GET /user/followers` | 1 | yes | Followers, page by page |
+| `client.user.following()` | `GET /user/following` | 1 | yes | Accounts followed, page by page |
+| `client.user.followersSearch()` | `GET /user/followers/search` | 1 |  | Find someone among the followers |
+| `client.user.followingSearch()` | `GET /user/following/search` | 1 |  | Find someone among the accounts followed |
+| `client.user.reposts()` | `GET /user/reposts` | 1 | yes | Posts and reels the account reposted |
+| `client.user.suggested()` | `GET /user/suggested` | 1 |  | Similar accounts Instagram suggests |
+| `client.post.get()` | `GET /post` | 1 |  | Views, likes, comments, shares, saves and reposts of one post |
+| `client.post.comments()` | `GET /post/comments` | 1 | yes | Comments with likes and reply counts |
+| `client.post.commentReplies()` | `GET /post/comment-replies` | 1 | yes | Replies to a comment |
+| `client.post.likers()` | `GET /post/likers` | 1 |  | Accounts that liked the post |
+| `client.post.usertags()` | `GET /post/usertags` | 1 |  | People tagged in the post |
+| `client.post.music()` | `GET /post/music` | 1 |  | The track used in a reel |
+| `client.comment.likers()` | `GET /comment/likers` | 1 | yes | Accounts that liked a comment |
+| `client.story.get()` | `GET /story` | 1 |  | One story by link or id |
+| `client.highlight.get()` | `GET /highlight` | 1 |  | Every story in a highlight, by link or id |
+| `client.hashtag.get()` | `GET /hashtag` | 1 |  | A hashtag with its post count |
+| `client.hashtag.posts()` | `GET /hashtag/posts` | 1 | yes | Posts under a hashtag: top, recent or reels |
+| `client.location.get()` | `GET /location` | 1 |  | Place name, address, city and coordinates |
+| `client.location.posts()` | `GET /location/posts` | 1 | yes | Posts tagged at a place: top or recent |
+| `client.location.search()` | `GET /location/search` | 1 |  | Find places by name or around a point |
+| `client.search.users()` | `GET /search/users` | 1 | yes | Find accounts by name or username |
+| `client.search.hashtags()` | `GET /search/hashtags` | 1 | yes | Find hashtags, with their post counts |
+| `client.search.places()` | `GET /search/places` | 1 |  | Find places by name |
+| `client.search.music()` | `GET /search/music` | 1 | yes | Find tracks by title or artist |
+| `client.search.reels()` | `GET /search/reels` | 1 | yes | Find reels for a text |
+| `client.search.top()` | `GET /search/top` | 1 | yes | The top posts for a text |
+| `client.track.get()` | `GET /track` | 1 |  | Track title, artist, length and audio link |
+| `client.resolve()` | `GET /resolve` | 1, or 2 for share links |  | Turn a post, reel or share link into data |
+| `client.shop.storefront()` | `GET /shop/storefront` | 1 |  | An account's shop: collections and first products |
+| `client.shop.products()` | `GET /shop/products` | 1 | yes | Products in a shop collection |
+| `client.account()` | `GET /account` | 0 |  | Your plan, balance, free units and use |
+<!-- methods:end -->
+
+Parameters, in short:
+
+- Account calls (`user.*`, `shop.storefront`) take `{ username }` or `{ id }`. The calls with a cursor also take `cursor`. `user.followersSearch` and `user.followingSearch` also take `q`.
+- Post calls (`post.*`) take `{ url }`, `{ code }` (the part of the link after `/p/` or `/reel/`) or `{ id }`. `post.comments` takes `cursor`. `post.commentReplies` also takes `comment_id`.
+- `story.get` and `highlight.get` take `{ url }` or `{ id }`.
+- `hashtag.posts` takes `name`, `sort` (`top`, `recent` or `reels`; keep it the same from page to page) and `cursor`. `location.posts` takes `id`, `sort` (`top` or `recent`) and `cursor`.
+- `location.search` takes `q`, or `lat` and `lng`. The `search.*` calls take `q`, 1 to 100 characters.
+- `post.get` returns the numbers of a post, not its media files. Media links come with the lists that carry posts: `user.posts`, `user.reels`, `hashtag.posts` and the like.
+
+## Docs
+
+- API docs, with a page for each endpoint: <https://storiesfly.com/developers/docs>
+- OpenAPI 3.1 spec: <https://storiesfly.com/openapi.json> (this repository holds a copy as [`openapi.json`](openapi.json) and [`openapi.yaml`](openapi.yaml))
+- API changelog: <https://storiesfly.com/developers/changelog>
+- Changelog of this package: [CHANGELOG.md](CHANGELOG.md)
+- Examples: [`stories.mjs`](examples/stories.mjs) (stories of an account), [`followers.mjs`](examples/followers.mjs) (followers with `paginate`) and [`post-metrics.mjs`](examples/post-metrics.mjs) (the numbers of a post). Run them with `STORIESFLY_API_KEY=your_key node examples/stories.mjs instagram`.
+
+## Migrating from 0.x
+
+1.0 is a rewrite for API v1. The old methods are gone, the base URL changed, and the old plans and daily quotas do not exist in v1.
+
+| 0.x | 1.0 |
+| --- | --- |
+| `getStories(username)` | `user.stories({ username })`. It returns `{ user, stories }`. The profile and the highlights are separate calls (`user.profile`, `user.highlights`), and you pay for each. |
+| `getProfile(username)` | `user.profile({ username })`. It also gives `id`, `bio`, `verified` and `external_url`. |
+| `getHighlights(id)` | `highlight.get({ id })`, with every story in the highlight. `user.highlights` lists the highlights of an account. |
+| `getMedia(url)` | `post.get({ url })`. It returns the numbers of the post (likes, comments, views, shares, saves, reposts), not its media files. Media links come with `user.posts`, `user.reels` and other lists. |
+| `download(url)` | No replacement. The links in the answers are CDN links: download the file from the link in your own code. |
+| `getTrackerEvents`, `listTrackedAccounts`, `addTrackedAccount`, `removeTrackedAccount`, `checkShadowban`, `getOutboundEngagement` | Not part of API v1, so not in 1.0. |
+
+What else changed:
+
+- `baseUrl` now defaults to `https://storiesfly.com/api/v1`. The `bearerToken` option is gone: v1 takes the key in `X-Api-Key` and nowhere else.
+- Methods are grouped by resource: `client.user.profile()`, `client.post.get()`, `client.search.users()`. Every method takes one object of parameters.
+- Answers use the API's own `snake_case` names, and `null` for a value that is missing: `fullName` is now `full_name`, `profilePicUrl` is `profile_pic_url`, `isPrivate` is `is_private`, `takenAt` is `taken_at`.
+- `StoriesFlyError` has `code`, `requestId` and `retryAfterMs`. The 0.x fields `rateLimit`, `retryAfterSec`, `requiresUpgrade`, `isRateLimited` and `method` are gone. Compare `err.code` with `rate_limited`, `credits_exhausted` and the rest. A `429` is now retried for you.
+- The old plans (DEV, Starter, Growth, Scale, and the Tracker plans), their daily quotas and the 60 requests a minute burst limit are gone. v1 bills from a prepaid balance, per request, with 100 free requests for a new account. See [Pricing](#pricing).
+- A key from before works on v1 once the account behind it is linked to Telegram. Until then v1 answers `telegram_required`, and `err.linkUrl` has the link.
+- The tracker, shadow ban and outbound analytics endpoints still answer over HTTP, but 1.0 does not wrap them. To keep using them, stay on `storiesfly@0` or call them yourself. The older `/api/stories`, `/api/profile`, `/api/highlights`, `/api/media` and `/api/download` endpoints that 0.x calls keep working for existing free keys until 2026-12-31. Details: <https://storiesfly.com/developers/docs/legacy>.
+
+## Not affiliated
+
+This is a client for the StoriesFly API. It does not talk to Instagram. It reads public data only, and a private account gives `private_account`. It is not an Instagram or Meta product and is not affiliated with or endorsed by them.
+
+## Development
+
+```sh
+npm install
+npm test               # clean, build, compile the tests and run them
+npm run openapi:check  # validate openapi.json and openapi.yaml, and check that they match
+npm run readme:check   # check the method table above against the spec
+```
+
+To update the spec: replace `openapi.json` with the new file, run `npm run openapi:sync` and `npm run readme:sync`, and run the tests.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

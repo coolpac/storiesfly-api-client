@@ -1,334 +1,383 @@
 /**
- * Request and response shapes for the StoriesFly API.
+ * Response shapes of StoriesFly API v1.
  *
- * Every type here was read off the route handler that produces it (and, for
- * database-backed rows, off the Prisma model behind that handler). Where a
- * response is assembled from data the handler does not fully constrain — a
- * `Json` column, an upstream payload passed straight through — the field is
- * typed loosely on purpose rather than guessed at.
- */
-
-/* -------------------------------------------------------------------------- */
-/* Errors                                                                      */
-/* -------------------------------------------------------------------------- */
-
-/**
- * JSON error body. Every handler answers failures with at least `error`;
- * the remaining fields appear on specific paths (quota, tier, session).
- */
-export interface ApiErrorBody {
-  error?: string;
-  /** Set to `SESSION_EXPIRED` on an expired Bearer token. */
-  code?: string;
-  /** Present on quota / tier refusals. */
-  upgrade?: boolean;
-  /** Present on tier refusals, e.g. `"PRO"`. */
-  requiredTier?: string;
-  limit?: number;
-  used?: number;
-  retryAfterSec?: number;
-  [key: string]: unknown;
-}
-
-/**
- * Rate-limit state read off response headers.
+ * Every shape follows the same rules:
  *
- * `X-RateLimit-*` are set by the content endpoints (stories, profile,
- * highlights, media, download) on both success and quota refusal. The tracker
- * and analytics endpoints do not set them, so every field is optional.
+ * - Names are `snake_case`, as on the wire.
+ * - A value the answer does not carry is `null`. It is never `0`, `""` or a guess.
+ * - Ids are strings. Instagram ids pass 2^53, so a JSON number would round them.
+ * - Times are Unix seconds, with an `_iso` twin where one is given.
+ * - Links to media are signed Instagram CDN URLs. They expire within days.
  */
-export interface RateLimitInfo {
-  /** `X-RateLimit-Limit` */
-  limit?: number;
-  /** `X-RateLimit-Remaining` */
-  remaining?: number;
-  /** `X-RateLimit-Used` */
-  used?: number;
-  /** `Retry-After` header, falling back to `retryAfterSec` in the body. */
-  retryAfterSec?: number;
-}
 
-/* -------------------------------------------------------------------------- */
-/* Content                                                                     */
-/* -------------------------------------------------------------------------- */
+/** `reel` is a video published as a Reel. `video` is any other video post. */
+export type MediaType = "photo" | "video" | "carousel" | "reel";
 
-export type MediaType = "image" | "video";
-
-/** Profile object embedded in the `POST /api/stories` response. */
-export interface StoryProfile {
-  /** Instagram numeric user id. Empty string when the upstream fetch failed. */
+/** An account named by id, and by username when the answer knows it. */
+export interface UserRef {
   id: string;
-  username: string;
-  fullName: string;
-  profilePicUrl: string;
-  posts: number;
-  followers: number;
-  following: number;
-  isPrivate: boolean;
-  bio?: string;
+  /** Null when only the id was asked for and the answer named nobody. */
+  username: string | null;
+}
+
+/** An account inside a list or on another object: a follower, a liker, a commenter. */
+export interface UserShort {
+  id: string;
+  username: string | null;
+  full_name: string | null;
+  profile_pic_url: string | null;
+  /** Null when the answer did not say. That is not the same as `false`. */
+  verified: boolean | null;
+  is_private: boolean | null;
+}
+
+/** One image or video: a whole post, or one slide of a carousel. */
+export interface MediaItem {
+  id: string;
+  type: "image" | "video";
+  /** The largest rendition. For a video, its cover. */
+  image_url: string | null;
+  video_url: string | null;
+  width: number | null;
+  height: number | null;
+  /** Seconds. */
+  video_duration: number | null;
+}
+
+export interface Post {
+  id: string;
+  /** The part of the link after `/p/` or `/reel/`. */
+  shortcode: string;
+  url: string;
+  owner: UserRef | null;
+  /** Unix seconds. */
+  taken_at: number | null;
+  taken_at_iso: string | null;
+  caption: string | null;
+  media_type: MediaType;
+  /** Pinned to the top of the profile grid. Pinned posts come first on page one, out of date order. */
+  pinned: boolean;
+  thumbnail_url: string | null;
+  /** One entry for a photo, video or reel. One per slide for a carousel. */
+  media: MediaItem[];
+  likes: number | null;
+  comments: number | null;
+  /** Sends to other users. Null when Instagram does not report it. */
+  shares: number | null;
+  /** Reposts to the reposter's own profile. */
+  reposts: number | null;
+  /** Plays. Reels and videos only. Null for photos and carousels. */
+  views: number | null;
+  /** Reels only. Instagram does not report saves for photos or carousels. */
+  saves: number | null;
+  video_duration: number | null;
+  /** The author hid like and view counts, so the numbers above may be absent or partial. */
+  counts_hidden: boolean;
+}
+
+/** What `post.get` returns: the numbers of one post, without its media. */
+export interface PostMetrics {
+  id: string;
+  shortcode: string;
+  url: string;
+  owner: UserRef | null;
+  media_type: MediaType;
+  taken_at: number | null;
+  taken_at_iso: string | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  reposts: number | null;
+  video_duration: number | null;
+  counts_hidden: boolean;
 }
 
 export interface Story {
   id: string;
-  mediaType: MediaType;
-  source: string;
-  thumbnail?: string;
-  /** ISO 8601 timestamp. */
-  takenAt: string;
-  /** True when the archived file is gone and the CDN URL has expired. */
-  expired?: boolean;
+  /** Null only when the answer named no owner to build the link from. */
+  url: string | null;
+  taken_at: number | null;
+  taken_at_iso: string | null;
+  media_type: "photo" | "video";
+  /** The video for a video story, the image for a photo story. */
+  media_url: string | null;
+  thumbnail_url: string | null;
+  video_duration: number | null;
 }
 
-/** Highlight reel cover, as listed alongside stories. */
-export interface HighlightReel {
+/** What `user.profile` returns. The fields of `user.about` are a separate call. */
+export interface Profile {
   id: string;
-  title: string;
-  coverUrl: string;
-}
-
-/** `POST /api/stories` */
-export interface StoriesResponse {
-  profile: StoryProfile;
-  stories: Story[];
-  highlights: HighlightReel[];
-  /** True when served from the server-side profile cache without a live fetch. */
-  fromCache: boolean;
-}
-
-/**
- * `GET /api/profile`
- *
- * Assembled field-by-field by the handler from the cached-profile row (or a
- * live fetch). `fullName` and `profilePicUrl` are nullable columns. `bio` is
- * stored but is not part of the response — see README, "Docs vs. handler".
- */
-export interface ProfileResponse {
   username: string;
-  fullName: string | null;
-  profilePicUrl: string | null;
-  posts: number;
-  followers: number;
-  following: number;
-  isPrivate: boolean;
+  full_name: string | null;
+  bio: string | null;
+  followers: number | null;
+  following: number | null;
+  /** The number of posts. */
+  posts: number | null;
+  verified: boolean;
+  is_private: boolean;
+  profile_pic_url: string | null;
+  external_url: string | null;
 }
 
-/** One item inside a highlight reel. */
-export interface HighlightItem {
+/** What `user.about` returns: Instagram's "About this account" panel. */
+export interface ProfileAbout {
   id: string;
-  mediaType: MediaType;
-  source: string;
-  thumbnail?: string;
-  /** ISO 8601 timestamp. */
-  takenAt: string;
+  username: string | null;
+  /** The country the account is based in. Null when Instagram shows none, as is often the case for private accounts. */
+  country: string | null;
+  /** The month the account joined, as `YYYY-MM`. */
+  account_created: string | null;
+  /** Null when the panel did not give a readable list. An empty list means the account was never renamed. */
+  former_usernames: string[] | null;
 }
 
-/** `GET /api/highlights` */
-export interface HighlightsResponse {
-  items: HighlightItem[];
+export interface Highlight {
+  /** Digits only. Pass it back as `id`. */
+  id: string;
+  title: string | null;
+  /** The cover as the profile shows it, a square crop. */
+  cover_url: string | null;
+  items_count: number | null;
+  /** Unix seconds. */
+  created_at: number | null;
+  created_at_iso: string | null;
 }
 
-export interface MediaItem {
-  type: MediaType;
-  url: string;
-  thumbnail?: string;
+export interface PostComment {
+  id: string;
+  text: string | null;
+  /** Unix seconds. */
+  created_at: number | null;
+  created_at_iso: string | null;
+  user: UserShort;
+  likes: number | null;
+  /** Null when the answer did not report it. It does not for every comment. */
+  replies_count: number | null;
+  /** The comment this one answers. Null for a top-level comment. */
+  parent_id: string | null;
 }
 
-/** `POST /api/media` */
-export interface MediaResponse {
-  media: MediaItem[];
-}
-
-/** `POST /api/media` accepts a post/reel URL, a bare shortcode, or both. */
-export type MediaRequest =
-  | { url: string; shortcode?: string }
-  | { url?: string; shortcode: string };
-
-/** `GET /api/download` — the only endpoint that answers with bytes, not JSON. */
-export interface DownloadResult {
-  /** `Content-Type` as sent by the proxy, e.g. `image/jpeg` or `video/mp4`. */
-  contentType: string;
-  /** Filename from `Content-Disposition`, e.g. `storiesfly_1717000000000.jpg`. */
-  filename: string | null;
-  data: Uint8Array;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Analytics                                                                   */
-/* -------------------------------------------------------------------------- */
-
-export type ShadowbanStatus = "ok" | "warning" | "critical";
-
-export type ShadowbanVerdict = "clean" | "possibly_limited" | "likely_shadowbanned";
-
-export interface ShadowbanSignal {
+export interface Hashtag {
+  id: string;
+  /** Without the leading `#`. */
   name: string;
-  status: ShadowbanStatus;
-  description: string;
-  weight: number;
+  posts_count: number | null;
+  profile_pic_url: string | null;
 }
 
-/** `GET /api/analytics/shadowban` */
-export interface ShadowbanResponse {
-  username: string;
-  /** 0 (clean) to 100 (likely shadowbanned). */
-  score: number;
-  verdict: ShadowbanVerdict;
-  signals: ShadowbanSignal[];
-  /** ISO 8601 timestamp. */
-  checkedAt: string;
-  recommendations: string[];
+/** An Instagram place. */
+export interface Place {
+  id: string;
+  name: string | null;
+  address: string | null;
+  city: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
-export interface OutboundTarget {
-  username: string;
-  likes: number;
-  comments: number;
+export interface Track {
+  /** The id of the audio page. Pass it back as `id`. */
+  id: string;
+  title: string | null;
+  artist: string | null;
+  /** Seconds, to the millisecond. */
+  duration: number | null;
+  cover_url: string | null;
+  /** The audio file. A signed link that expires within days. */
+  audio_url: string | null;
 }
 
-export interface OutboundActivity {
-  type: "like" | "comment";
-  targetUsername: string;
-  targetPostId: string;
-  /** Free-form JSON column — the handler passes it through untouched. */
-  details: Record<string, unknown>;
-  /** ISO 8601 timestamp. */
-  detectedAt: string;
-}
-
-/** `GET /api/analytics/outbound` */
-export interface OutboundEngagementResponse {
-  username: string;
-  days: number;
-  totalLikes: number;
-  totalComments: number;
-  /** Top 15 targets by likes + comments. */
-  topTargets: OutboundTarget[];
-  /** 50 most recent outbound events. */
-  recentActivity: OutboundActivity[];
+export interface Product {
+  id: string;
+  name: string | null;
+  /** What a buyer pays now, in the major unit of `currency` (60 for "$60.00"). */
+  price: number | null;
+  /** ISO 4217. Null when the answer gave none. */
+  currency: string | null;
+  image_url: string | null;
+  /** The seller's own page for the product. */
+  url: string | null;
 }
 
 /* -------------------------------------------------------------------------- */
-/* Tracker                                                                     */
+/* Pages                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export type TrackerSyncStatus = "PENDING" | "SYNCING" | "READY" | "FAILED";
+/** The two fields every list carries. */
+export interface PageInfo {
+  /** Pass back as `cursor` for the next page. Null on the last page. */
+  next_cursor: string | null;
+  has_more: boolean;
+}
 
-export type ActivityType =
-  | "LIKE"
-  | "COMMENT"
-  | "FOLLOW"
-  | "UNFOLLOW"
-  | "STORY_POST"
-  | "FOLLOWER_ADDED"
-  | "FOLLOWER_REMOVED"
-  | "OUTBOUND_LIKE"
-  | "OUTBOUND_COMMENT";
+/** Posts of an account: `user.posts`, `.reels`, `.tagged`, `.pinned`, `.reposts`. */
+export interface UserPostsPage extends PageInfo {
+  user: UserRef;
+  posts: Post[];
+}
 
-/**
- * A tracked account row, as returned in full by `POST /api/tracker/accounts`
- * and (with `deepAnalytics` attached) by `GET /api/tracker`.
- *
- * `initialFollowers` / `initialFollowing` are the counts captured when the
- * account was added — they are a baseline, not live counts.
- */
-export interface TrackedAccount {
+export interface UserHighlightsPage extends PageInfo {
+  user: UserRef;
+  highlights: Highlight[];
+}
+
+/** Accounts related to an account: followers, following, their searches, suggestions. */
+export interface UsersPage extends PageInfo {
+  user: UserRef;
+  users: UserShort[];
+}
+
+export interface UserStories {
+  user: UserRef;
+  stories: Story[];
+}
+
+export interface PostCommentsPage extends PageInfo {
+  post: { id: string };
+  comments: PostComment[];
+}
+
+export interface CommentRepliesPage extends PageInfo {
+  post: { id: string };
+  comment: { id: string };
+  comments: PostComment[];
+}
+
+/** Accounts related to a post: `post.likers` and `post.usertags`. */
+export interface PostUsersPage extends PageInfo {
+  post: { id: string };
+  users: UserShort[];
+}
+
+export interface PostMusic {
+  post: { id: string };
+  /** Null when the post has no music. */
+  track: Track | null;
+}
+
+export interface CommentLikersPage extends PageInfo {
+  comment: { id: string };
+  users: UserShort[];
+}
+
+export interface StoryResult {
+  user: UserRef;
+  story: Story;
+}
+
+/** A highlight with every story in it. */
+export interface HighlightDetail extends Highlight {
+  user: UserRef | null;
+  stories: Story[];
+}
+
+export interface HashtagPostsPage extends PageInfo {
+  name: string;
+  sort: "top" | "recent" | "reels";
+  posts: Post[];
+}
+
+export interface LocationPostsPage extends PageInfo {
+  location: { id: string };
+  sort: "top" | "recent";
+  posts: Post[];
+}
+
+/** `location.search` and `search.places`. */
+export interface PlacesPage extends PageInfo {
+  locations: Place[];
+}
+
+export interface SearchUsersPage extends PageInfo {
+  users: UserShort[];
+}
+
+export interface SearchHashtagsPage extends PageInfo {
+  hashtags: Hashtag[];
+}
+
+export interface SearchMusicPage extends PageInfo {
+  tracks: Track[];
+}
+
+/** `search.reels` and `search.top`. */
+export interface SearchPostsPage extends PageInfo {
+  posts: Post[];
+}
+
+/** What `resolve` returns. `type` says which kind of thing the link points at. */
+export type Resolved =
+  | ({ type: "post" } & PostMetrics)
+  | ({ type: "story" } & StoryResult)
+  | ({ type: "highlight" } & HighlightDetail)
+  | ({ type: "user" } & Profile);
+
+export interface ShopCollection {
+  /** Pass it back as `collection_id` to `shop.products`. */
   id: string;
-  userId: string;
-  igUsername: string;
-  igUserId: string | null;
-  initialFollowers: number | null;
-  initialFollowing: number | null;
-  storyOnly: boolean;
-  trackLikes: boolean;
-  trackFollows: boolean;
-  trackFollowers: boolean;
-  trackStories: boolean;
-  notifyNewStory: boolean;
-  syncStatus: TrackerSyncStatus;
-  syncRetries: number;
-  /** ISO 8601 timestamp, or null before the first poll. */
-  lastPolledAt: string | null;
-  lastDiffAt: string | null;
-  lastStoryPolledAt: string | null;
-  createdAt: string;
+  name: string | null;
 }
 
-/**
- * The narrower projection returned by `GET /api/tracker/accounts` — the handler
- * selects an explicit subset, so `userId`, `trackLikes`, `syncRetries` and
- * `lastDiffAt` are absent there.
- */
-export type TrackedAccountSummary = Pick<
-  TrackedAccount,
-  | "id"
-  | "igUsername"
-  | "igUserId"
-  | "initialFollowers"
-  | "initialFollowing"
-  | "storyOnly"
-  | "trackFollows"
-  | "trackFollowers"
-  | "trackStories"
-  | "notifyNewStory"
-  | "syncStatus"
-  | "lastPolledAt"
-  | "lastStoryPolledAt"
-  | "createdAt"
->;
-
-/** Deep Analytics addon state, as selected into `GET /api/tracker`. */
-export interface DeepAnalyticsAddonSummary {
-  active: boolean;
-  trialEndsAt: string | null;
-  endsAt: string | null;
+export interface Storefront extends PageInfo {
+  merchant: UserRef;
+  collections: ShopCollection[];
+  /** The first products of the shop. */
+  products: Product[];
 }
 
-export type TrackedAccountWithAddon = TrackedAccount & {
-  deepAnalytics: DeepAnalyticsAddonSummary | null;
-};
-
-/** `GET /api/tracker/accounts` */
-export interface TrackedAccountsResponse {
-  accounts: TrackedAccountSummary[];
+export interface ShopProductsPage extends PageInfo {
+  collection: { id: string };
+  products: Product[];
 }
 
-/**
- * One activity-log row.
- *
- * The column is `activityType`, not `type`. `targetUsername` is a real column,
- * but some producers write it into `details` instead, so read both.
- */
-export interface TrackerActivity {
-  id: string;
-  igUsername: string;
-  activityType: ActivityType;
-  targetUsername: string | null;
-  targetPostId: string | null;
-  /** Free-form JSON column; shape varies by `activityType`. */
-  details: Record<string, unknown> | null;
-  /** ISO 8601 timestamp. */
-  detectedAt: string;
+/** The price levels of an account. Levels above the one open today appear here when they open. */
+export type AccountTier = "FREE" | "START" | "GROWTH" | "BUSINESS" | "SCALE";
+
+/** What `account` returns. The call is free. */
+export interface Account {
+  tier: AccountTier;
+  /** The price of one unit, in US dollars. Exact, not rounded to four decimals. */
+  unit_price_usd: number;
+  balance_usd: number;
+  /** Free units left. They are spent before the balance. */
+  free_units: number;
+  lifetime_topup_usd: number;
+  /** The level above yours and what is left to top up to reach it. Null at the top, or when that level is not open yet. */
+  next_tier: { tier: AccountTier; remaining_usd: number } | null;
+  /** The highest level open today. */
+  tier_cap: AccountTier;
+  /** Your use of the last 30 days, busiest endpoint first. */
+  usage_30d: { endpoint: string; calls: number; spent_usd: number }[];
 }
 
-/** `GET /api/tracker` */
-export interface TrackerEventsResponse {
-  accounts: TrackedAccountWithAddon[];
-  activities: TrackerActivity[];
-  /** Total activity rows before pagination and de-duplication. */
-  total: number;
-  page: number;
-  pages: number;
+/* -------------------------------------------------------------------------- */
+/* Response meta                                                               */
+/* -------------------------------------------------------------------------- */
+
+/** What the headers of an answer say about the call. A header the answer did not carry is `null`. */
+export interface ResponseMeta {
+  /** The HTTP status. */
+  status: number;
+  /** `X-Request-Id`. Quote it when you write to support about a call. */
+  requestId: string | null;
+  /** `X-Units-Charged`. 0 when the call was free or was refunded. */
+  unitsCharged: number | null;
+  /** `X-Balance-Remaining`: US dollars with four decimals, as the API sends it. A string, so no float rounds it. */
+  balanceRemaining: string | null;
+  /** `X-Free-Units-Remaining`. */
+  freeUnitsRemaining: number | null;
+  /** `X-RateLimit-Limit`: requests per second your account may send. */
+  rateLimitLimit: number | null;
+  /** `X-RateLimit-Remaining`: requests left in the current second. */
+  rateLimitRemaining: number | null;
 }
 
-/** `GET /api/tracker` query. Server defaults: page 1, limit 200. */
-export interface TrackerEventsParams {
-  /** 1-100. */
-  page?: number;
-  /** 20-500. */
-  limit?: number;
-}
-
-/** `DELETE /api/tracker/accounts` */
-export interface RemoveTrackedAccountResponse {
-  success: true;
+/** A body with the meta of the call that returned it. */
+export interface ApiResult<T> {
+  data: T;
+  meta: ResponseMeta;
 }

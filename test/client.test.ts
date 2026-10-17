@@ -1,478 +1,456 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { inspect } from "node:util";
 
-import { StoriesFly, StoriesFlyError, buildQuery, type FetchLike } from "../src/index.js";
-
-interface RecordedCall {
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: string | undefined;
-}
-
-interface StubResult {
-  status?: number;
-  body?: unknown;
-  headers?: Record<string, string>;
-  /** Raw body, for the non-JSON responses (binary downloads, plain-text errors). */
-  raw?: string | Uint8Array;
-}
-
-/** A `fetch` stub that records every call and replays queued responses. */
-function stubFetch(...results: StubResult[]): {
-  fetch: FetchLike;
-  calls: RecordedCall[];
-} {
-  const calls: RecordedCall[] = [];
-  const queue = [...results];
-
-  const fetch: FetchLike = async (url, init) => {
-    calls.push({
-      url,
-      method: init?.method ?? "GET",
-      headers: { ...((init?.headers ?? {}) as Record<string, string>) },
-      body: typeof init?.body === "string" ? init.body : undefined,
-    });
-
-    const next = queue.length > 1 ? queue.shift()! : (queue[0] ?? {});
-    const status = next.status ?? 200;
-    const headers = { ...(next.headers ?? {}) };
-
-    if (next.raw !== undefined) {
-      return new Response(next.raw, { status, headers });
-    }
-    if (next.body === undefined) {
-      return new Response(null, { status, headers });
-    }
-    return new Response(JSON.stringify(next.body), {
-      status,
-      headers: { "content-type": "application/json", ...headers },
-    });
-  };
-
-  return { fetch, calls };
-}
-
-const client = (fetch: FetchLike, extra?: { baseUrl?: string; bearerToken?: string }) =>
-  new StoriesFly({ apiKey: "sf_live_test_key", fetch, ...extra });
+import { buildQuery } from "../src/client.js";
+import { StoriesFly, StoriesFlyError, type ApiErrorCode } from "../src/index.js";
+import { makeClient, stubFetch, type Reply } from "./helpers.js";
 
 /* -------------------------------------------------------------------------- */
 /* Construction                                                                */
 /* -------------------------------------------------------------------------- */
 
-test("constructor requires an API key", () => {
-  assert.throws(
-    () => new StoriesFly({ apiKey: "" }),
-    (err: unknown) => err instanceof TypeError && /apiKey/.test((err as Error).message)
-  );
+test("the constructor requires an API key", () => {
+  assert.throws(() => new StoriesFly({ apiKey: "" }), (err: unknown) => err instanceof TypeError && /apiKey/.test((err as Error).message));
+  assert.throws(() => new StoriesFly({ apiKey: "   " }), TypeError);
+  assert.throws(() => new StoriesFly(undefined as never), TypeError);
 });
 
-test("baseUrl defaults to storiesfly.com and trailing slashes are trimmed", async () => {
-  const { fetch, calls } = stubFetch({ body: { username: "a" } });
-  assert.equal(client(fetch).baseUrl, "https://storiesfly.com");
-
-  const custom = client(fetch, { baseUrl: "http://localhost:3000///" });
-  assert.equal(custom.baseUrl, "http://localhost:3000");
-  await custom.getProfile("a");
-  assert.equal(calls[0]?.url, "http://localhost:3000/api/profile?username=a");
+test("timeoutMs and maxRetries are checked", () => {
+  const { fetch } = stubFetch({});
+  assert.throws(() => new StoriesFly({ apiKey: "k", fetch, timeoutMs: -1 }), TypeError);
+  assert.throws(() => new StoriesFly({ apiKey: "k", fetch, timeoutMs: Number.NaN }), TypeError);
+  assert.throws(() => new StoriesFly({ apiKey: "k", fetch, maxRetries: 1.5 }), TypeError);
+  assert.throws(() => new StoriesFly({ apiKey: "k", fetch, maxRetries: -1 }), TypeError);
+  assert.doesNotThrow(() => new StoriesFly({ apiKey: "k", fetch, timeoutMs: 0, maxRetries: 0 }));
 });
 
-/* -------------------------------------------------------------------------- */
-/* Happy paths                                                                 */
-/* -------------------------------------------------------------------------- */
-
-test("getStories posts the username and returns the parsed body", async () => {
-  const payload = {
-    profile: {
-      id: "25025320",
-      username: "instagram",
-      fullName: "Instagram",
-      profilePicUrl: "https://cdninstagram.com/pic.jpg",
-      posts: 7503,
-      followers: 680000000,
-      following: 75,
-      isPrivate: false,
-    },
-    stories: [
-      {
-        id: "story_1",
-        mediaType: "image",
-        source: "https://cdninstagram.com/s1.jpg",
-        takenAt: "2026-03-04T10:30:00Z",
-      },
-    ],
-    highlights: [{ id: "highlight:1", title: "Trips", coverUrl: "https://cdninstagram.com/c.jpg" }],
-    fromCache: false,
-  };
-  const { fetch, calls } = stubFetch({ body: payload });
-
-  const result = await client(fetch).getStories("instagram");
-
-  assert.deepEqual(result, payload);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.method, "POST");
-  assert.equal(calls[0]?.url, "https://storiesfly.com/api/stories");
-  assert.equal(calls[0]?.body, '{"username":"instagram"}');
-  assert.equal(calls[0]?.headers["Content-Type"], "application/json");
-});
-
-test("getProfile returns the handler's field set", async () => {
-  const payload = {
-    username: "instagram",
-    fullName: "Instagram",
-    profilePicUrl: null,
-    posts: 7503,
-    followers: 680000000,
-    following: 75,
-    isPrivate: false,
-  };
-  const { fetch } = stubFetch({ body: payload });
-
-  const profile = await client(fetch).getProfile("instagram");
-
-  assert.equal(profile.followers, 680000000);
-  assert.equal(profile.profilePicUrl, null);
-});
-
-test("getMedia accepts a bare URL or an explicit shortcode", async () => {
-  const { fetch, calls } = stubFetch({ body: { media: [] } });
-  const sf = client(fetch);
-
-  await sf.getMedia("https://www.instagram.com/p/ABC123/");
-  await sf.getMedia({ shortcode: "ABC123" });
-
-  assert.equal(calls[0]?.body, '{"url":"https://www.instagram.com/p/ABC123/"}');
-  assert.equal(calls[1]?.body, '{"shortcode":"ABC123"}');
-});
-
-test("addTrackedAccount posts igUsername and returns the created row", async () => {
-  const row = {
-    id: "clv1abc23def45ghi67jkl89",
-    userId: "clv0user00000000000000000",
-    igUsername: "instagram",
-    igUserId: "25025320",
-    initialFollowers: 680000000,
-    initialFollowing: 75,
-    storyOnly: false,
-    trackLikes: false,
-    trackFollows: true,
-    trackFollowers: true,
-    trackStories: true,
-    notifyNewStory: true,
-    syncStatus: "PENDING",
-    syncRetries: 0,
-    lastPolledAt: null,
-    lastDiffAt: null,
-    lastStoryPolledAt: null,
-    createdAt: "2026-03-04T12:00:00.000Z",
-  };
-  const { fetch, calls } = stubFetch({ body: row });
-
-  const account = await client(fetch).addTrackedAccount("instagram");
-
-  assert.equal(account.syncStatus, "PENDING");
-  assert.equal(calls[0]?.method, "POST");
-  assert.equal(calls[0]?.body, '{"igUsername":"instagram"}');
-});
-
-test("removeTrackedAccount sends DELETE with the id as a query parameter", async () => {
-  const { fetch, calls } = stubFetch({ body: { success: true } });
-
-  const result = await client(fetch).removeTrackedAccount("clv1abc23def45ghi67jkl89");
-
-  assert.equal(result.success, true);
-  assert.equal(calls[0]?.method, "DELETE");
-  assert.equal(
-    calls[0]?.url,
-    "https://storiesfly.com/api/tracker/accounts?accountId=clv1abc23def45ghi67jkl89"
-  );
-  assert.equal(calls[0]?.body, undefined);
-});
-
-test("download returns bytes, content type and the proxy filename", async () => {
-  const { fetch, calls } = stubFetch({
-    raw: new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
-    headers: {
-      "content-type": "image/jpeg",
-      "content-disposition": 'attachment; filename="storiesfly_1717000000000.jpg"',
-    },
-  });
-
-  const file = await client(fetch).download("https://cdninstagram.com/media.jpg?x=1");
-
-  assert.equal(file.contentType, "image/jpeg");
-  assert.equal(file.filename, "storiesfly_1717000000000.jpg");
-  assert.deepEqual(Array.from(file.data), [0xff, 0xd8, 0xff, 0xe0]);
-  assert.equal(
-    calls[0]?.url,
-    "https://storiesfly.com/api/download?url=https%3A%2F%2Fcdninstagram.com%2Fmedia.jpg%3Fx%3D1"
-  );
-});
-
-/* -------------------------------------------------------------------------- */
-/* Auth headers                                                                */
-/* -------------------------------------------------------------------------- */
-
-test("every request carries the API key in X-Api-Key", async () => {
+test("baseUrl defaults to the v1 API and trailing slashes are trimmed", async () => {
   const { fetch, calls } = stubFetch({ body: {} });
-  const sf = client(fetch);
+  assert.equal(makeClient(fetch).baseUrl, "https://storiesfly.com/api/v1");
 
-  await sf.getProfile("instagram");
-  await sf.getStories("instagram");
-  await sf.listTrackedAccounts();
-  await sf.download("https://cdninstagram.com/a.jpg").catch(() => undefined);
+  const local = makeClient(fetch, { baseUrl: "http://localhost:3000/api/v1///" });
+  assert.equal(local.baseUrl, "http://localhost:3000/api/v1");
+  await local.user.profile({ username: "a" });
+  assert.equal(calls[0]?.url, "http://localhost:3000/api/v1/user/profile?username=a");
+});
 
-  assert.equal(calls.length, 4);
-  for (const call of calls) {
-    assert.equal(call.headers["X-Api-Key"], "sf_live_test_key");
+test("the API key is not on the client where a log or JSON.stringify would show it", () => {
+  const { fetch } = stubFetch({});
+  const client = new StoriesFly({ apiKey: "sf_secret_value", fetch });
+  assert.ok(!JSON.stringify(client).includes("sf_secret_value"));
+  assert.ok(!inspect(client, { depth: 5, showHidden: true }).includes("sf_secret_value"));
+});
+
+test("the global fetch is used when none is given", () => {
+  assert.doesNotThrow(() => new StoriesFly({ apiKey: "k" }));
+});
+
+/* -------------------------------------------------------------------------- */
+/* What is sent                                                                */
+/* -------------------------------------------------------------------------- */
+
+test("a call is a GET with the key in X-Api-Key and no body", async () => {
+  const { fetch, calls } = stubFetch({ body: { user: { id: "1", username: "instagram" }, stories: [] } });
+  const client = new StoriesFly({ apiKey: "  sf_test_key\n", fetch });
+
+  await client.user.stories({ username: "instagram" });
+
+  assert.equal(calls.length, 1);
+  const call = calls[0]!;
+  assert.equal(call.url, "https://storiesfly.com/api/v1/user/stories?username=instagram");
+  assert.equal(call.init.method, "GET");
+  assert.equal(call.init.headers["X-Api-Key"], "sf_test_key");
+  assert.equal(call.init.headers["Accept"], "application/json");
+  assert.match(call.init.headers["User-Agent"] ?? "", /^storiesfly-js\/\d+\.\d+\.\d+$/);
+  assert.ok(!("body" in call.init));
+  assert.ok(!("Authorization" in call.init.headers));
+  assert.ok(call.init.signal instanceof AbortSignal);
+});
+
+test("the key never appears in the URL", async () => {
+  const { fetch, calls } = stubFetch({ body: {} });
+  await makeClient(fetch).user.profile({ id: "7719696" });
+  assert.ok(!calls[0]!.url.includes("sf_test_key"));
+});
+
+/* -------------------------------------------------------------------------- */
+/* Query encoding                                                              */
+/* -------------------------------------------------------------------------- */
+
+test("buildQuery leaves out undefined and null, and returns '' when nothing is left", () => {
+  assert.equal(buildQuery(undefined), "");
+  assert.equal(buildQuery({}), "");
+  assert.equal(buildQuery({ a: undefined, b: null }), "");
+  assert.equal(buildQuery({ a: "1", b: undefined, c: "3" }), "?a=1&c=3");
+});
+
+test("buildQuery percent-encodes values, with %20 for a space", () => {
+  assert.equal(buildQuery({ q: "coffee shop" }), "?q=coffee%20shop");
+  assert.equal(buildQuery({ q: "c++" }), "?q=c%2B%2B");
+  assert.equal(buildQuery({ q: "a&b=c#d" }), "?q=a%26b%3Dc%23d");
+  assert.equal(buildQuery({ q: "кофе" }), "?q=%D0%BA%D0%BE%D1%84%D0%B5");
+  assert.equal(buildQuery({ q: "☕" }), "?q=%E2%98%95");
+  assert.equal(buildQuery({ username: "@instagram" }), "?username=%40instagram");
+});
+
+test("buildQuery turns numbers and booleans into text, and keeps the order of the keys", () => {
+  assert.equal(buildQuery({ lat: 40.75267612, lng: -73.97777108 }), "?lat=40.75267612&lng=-73.97777108");
+  assert.equal(buildQuery({ z: 1, a: true }), "?z=1&a=true");
+  assert.equal(buildQuery({ n: 0 }), "?n=0");
+});
+
+test("buildQuery refuses a value that is not a string, number or boolean", () => {
+  assert.throws(() => buildQuery({ q: { nested: 1 } }), (err: unknown) => err instanceof TypeError && /`q`/.test((err as Error).message));
+  assert.throws(() => buildQuery({ q: ["a", "b"] }), TypeError);
+});
+
+test("a full URL and a cursor survive the trip into the query string", async () => {
+  const { fetch, calls } = stubFetch({ body: {} });
+  const client = makeClient(fetch);
+
+  await client.post.get({ url: "https://www.instagram.com/p/DcyLOLIEdy7/?igsh=abc&utm=1" });
+  assert.equal(
+    calls[0]!.url,
+    "https://storiesfly.com/api/v1/post?url=https%3A%2F%2Fwww.instagram.com%2Fp%2FDcyLOLIEdy7%2F%3Figsh%3Dabc%26utm%3D1",
+  );
+  const sent = new URL(calls[0]!.url).searchParams.get("url");
+  assert.equal(sent, "https://www.instagram.com/p/DcyLOLIEdy7/?igsh=abc&utm=1");
+
+  const cursor = "c1.ryg6VkAgkE2BcPyGM0q6ADwLG1KAGWvXyxXcleap6rtdnm6USXXD4rRRujLUjticHxS2vixe2jbdlG4LggGvIE1ISp6sYLXI6XWcb66UIrM_RMPDKCUhQylnCgNoMsPrfzM";
+  await client.user.posts({ username: "arianagrande", cursor });
+  assert.equal(new URL(calls[1]!.url).searchParams.get("cursor"), cursor);
+  assert.equal(new URL(calls[1]!.url).searchParams.get("username"), "arianagrande");
+});
+
+test("an undefined cursor is not sent", async () => {
+  const { fetch, calls } = stubFetch({ body: {} });
+  await makeClient(fetch).user.followers({ username: "instagram", cursor: undefined });
+  assert.equal(calls[0]!.url, "https://storiesfly.com/api/v1/user/followers?username=instagram");
+});
+
+test("lat and lng may be numbers", async () => {
+  const { fetch, calls } = stubFetch({ body: {} });
+  await makeClient(fetch).location.search({ lat: 40.7527, lng: -73.9778 });
+  assert.equal(calls[0]!.url, "https://storiesfly.com/api/v1/location/search?lat=40.7527&lng=-73.9778");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Response meta                                                               */
+/* -------------------------------------------------------------------------- */
+
+const BILLING_HEADERS = {
+  "x-units-charged": "1",
+  "x-balance-remaining": "9.2380",
+  "x-free-units-remaining": "17",
+  "x-ratelimit-limit": "3",
+  "x-ratelimit-remaining": "2",
+  "x-request-id": "req_123",
+};
+
+test("a call resolves to the body alone", async () => {
+  const body = { id: "7719696", username: "arianagrande" };
+  const { fetch } = stubFetch({ body, headers: BILLING_HEADERS });
+  assert.deepEqual(await makeClient(fetch).user.profile({ username: "arianagrande" }), body);
+});
+
+test("withMeta: true resolves to { data, meta } with the billing headers", async () => {
+  const body = { id: "7719696", username: "arianagrande" };
+  const { fetch } = stubFetch({ body, headers: BILLING_HEADERS });
+  const result = await makeClient(fetch).user.profile({ username: "arianagrande" }, { withMeta: true });
+
+  assert.deepEqual(result.data, body);
+  assert.deepEqual(result.meta, {
+    status: 200,
+    requestId: "req_123",
+    unitsCharged: 1,
+    balanceRemaining: "9.2380",
+    freeUnitsRemaining: 17,
+    rateLimitLimit: 3,
+    rateLimitRemaining: 2,
+  });
+});
+
+test("a header the answer lacks is null in meta", async () => {
+  const { fetch } = stubFetch({ body: {} });
+  const { meta } = await makeClient(fetch).user.profile({ username: "a" }, { withMeta: true });
+  assert.deepEqual(meta, {
+    status: 200,
+    requestId: null,
+    unitsCharged: null,
+    balanceRemaining: null,
+    freeUnitsRemaining: null,
+    rateLimitLimit: null,
+    rateLimitRemaining: null,
+  });
+});
+
+test("the balance stays a string, so no float rounds it", async () => {
+  const { fetch } = stubFetch({ body: {}, headers: { "x-balance-remaining": "0.1000" } });
+  const { meta } = await makeClient(fetch).user.profile({ username: "a" }, { withMeta: true });
+  assert.equal(meta.balanceRemaining, "0.1000");
+});
+
+test("account() takes no parameters, and takes options alone", async () => {
+  const body = { tier: "START", unit_price_usd: 0.0015, balance_usd: 9.238, free_units: 0 };
+  const { fetch, calls } = stubFetch({ body, headers: { ...BILLING_HEADERS, "x-units-charged": "0" } });
+  const client = makeClient(fetch);
+
+  assert.deepEqual(await client.account(), body);
+  const withMeta = await client.account({ withMeta: true });
+  assert.equal(withMeta.meta.unitsCharged, 0);
+  assert.equal(calls[0]!.url, "https://storiesfly.com/api/v1/account");
+  assert.equal(calls[1]!.url, "https://storiesfly.com/api/v1/account");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Errors                                                                      */
+/* -------------------------------------------------------------------------- */
+
+interface ErrorCase {
+  status: number;
+  code: ApiErrorCode;
+  extra?: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
+
+const ERROR_CASES: ErrorCase[] = [
+  { status: 400, code: "bad_request", extra: { fields: ["username"] } },
+  { status: 401, code: "unauthorized" },
+  { status: 402, code: "credits_exhausted" },
+  { status: 403, code: "telegram_required", extra: { link_url: "https://t.me/example_bot?start=link" } },
+  { status: 403, code: "private_account", headers: { "x-units-charged": "1" } },
+  { status: 404, code: "not_found", headers: { "x-units-charged": "1" } },
+  { status: 404, code: "unknown_endpoint" },
+  { status: 429, code: "rate_limited", headers: { "retry-after": "3" } },
+  { status: 500, code: "internal_error" },
+  { status: 503, code: "upstream_unavailable", headers: { "retry-after": "5" } },
+];
+
+for (const c of ERROR_CASES) {
+  test(`${c.status} ${c.code} becomes a StoriesFlyError with that code`, async () => {
+    const { fetch, calls } = stubFetch({
+      status: c.status,
+      body: { error: `sentence for ${c.code}`, code: c.code, ...c.extra },
+      headers: { "x-request-id": "req_err", ...c.headers },
+    });
+    const err = await makeClient(fetch, { maxRetries: 0 })
+      .user.profile({ username: "a" })
+      .then(
+        () => assert.fail("expected an error"),
+        (e: unknown) => e,
+      );
+
+    assert.ok(err instanceof StoriesFlyError);
+    assert.ok(err instanceof Error);
+    assert.equal(err.name, "StoriesFlyError");
+    assert.equal(err.status, c.status);
+    assert.equal(err.code, c.code);
+    assert.equal(err.requestId, "req_err");
+    assert.equal(err.meta?.requestId, "req_err");
+    assert.equal(err.url, "https://storiesfly.com/api/v1/user/profile?username=a");
+    assert.ok(err.message.includes(c.code) && err.message.includes(`sentence for ${c.code}`) && err.message.includes(String(c.status)));
+    assert.deepEqual(err.fields, c.extra?.fields ?? null);
+    assert.equal(err.linkUrl, (c.extra?.link_url as string | undefined) ?? null);
+    assert.equal(err.retryAfterMs, c.headers?.["retry-after"] ? Number(c.headers["retry-after"]) * 1000 : null);
+    assert.equal(err.meta?.unitsCharged, c.headers?.["x-units-charged"] ? Number(c.headers["x-units-charged"]) : null);
+    assert.equal(calls.length, 1);
+  });
+}
+
+test("an error says whether it was charged, through meta.unitsCharged", async () => {
+  const { fetch } = stubFetch({
+    status: 404,
+    body: { error: "Nothing was found for this request.", code: "not_found" },
+    headers: { "x-units-charged": "1", "x-balance-remaining": "9.0000", "x-free-units-remaining": "0" },
+  });
+  const err = (await makeClient(fetch).user.profile({ username: "nobody" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(err.meta?.unitsCharged, 1);
+  assert.equal(err.meta?.balanceRemaining, "9.0000");
+});
+
+test("an error body that is not JSON becomes invalid_response and keeps the status and the text", async () => {
+  const { fetch } = stubFetch({ status: 502, text: "<html><body>Bad gateway</body></html>", headers: { "content-type": "text/html" } });
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.ok(err instanceof StoriesFlyError);
+  assert.equal(err.status, 502);
+  assert.equal(err.code, "invalid_response");
+  assert.equal(err.body, "<html><body>Bad gateway</body></html>");
+  assert.match(err.message, /502/);
+});
+
+test("an error JSON without a known code becomes invalid_response and keeps the body", async () => {
+  const { fetch } = stubFetch({ status: 418, body: { error: "teapot", code: "teapot" } });
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(err.code, "invalid_response");
+  assert.equal(err.status, 418);
+  assert.deepEqual(err.body, { error: "teapot", code: "teapot" });
+});
+
+test("a 200 that is not JSON becomes invalid_response", async () => {
+  const { fetch } = stubFetch({ status: 200, text: "not json", headers: { "x-request-id": "req_x" } });
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(err.code, "invalid_response");
+  assert.equal(err.status, 200);
+  assert.equal(err.requestId, "req_x");
+});
+
+test("a failed fetch becomes network_error with the cause", async () => {
+  const cause = new TypeError("fetch failed");
+  const { fetch } = stubFetch({ fail: cause });
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.ok(err instanceof StoriesFlyError);
+  assert.equal(err.code, "network_error");
+  assert.equal(err.status, 0);
+  assert.equal(err.requestId, null);
+  assert.equal(err.meta, null);
+  assert.equal(err.cause, cause);
+});
+
+test("a call that takes longer than timeoutMs becomes timeout", async () => {
+  const { fetch, calls } = stubFetch({ hang: true });
+  const started = performance.now();
+  const err = (await makeClient(fetch, { timeoutMs: 40 }).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.ok(err instanceof StoriesFlyError);
+  assert.equal(err.code, "timeout");
+  assert.equal(err.status, 0);
+  assert.ok(performance.now() - started < 1000);
+  assert.equal(calls.length, 1);
+});
+
+test("timeoutMs can be set for one call, and 0 turns it off", async () => {
+  const { fetch } = stubFetch({ hang: true });
+  const err = (await makeClient(fetch, { timeoutMs: 60_000 }).user.profile({ username: "a" }, { timeoutMs: 30 }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(err.code, "timeout");
+
+  const ok = stubFetch({ body: { ok: true } });
+  assert.deepEqual(await makeClient(ok.fetch, { timeoutMs: 0 }).user.profile({ username: "a" }), { ok: true });
+});
+
+test("the caller's signal aborts the call with the caller's own reason", async () => {
+  const { fetch } = stubFetch({ hang: true });
+  const controller = new AbortController();
+  const pending = makeClient(fetch).user.profile({ username: "a" }, { signal: controller.signal });
+  setTimeout(() => controller.abort(new Error("stop")), 20);
+  await assert.rejects(pending, (err: unknown) => !(err instanceof StoriesFlyError) && (err as Error).message === "stop");
+});
+
+test("a signal that is aborted already sends nothing", async () => {
+  const { fetch, calls } = stubFetch({ body: {} });
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(makeClient(fetch).user.profile({ username: "a" }, { signal: controller.signal }));
+  assert.equal(calls.length, 0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Retries                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const LIMITED = (retryAfter: string | undefined): Reply => ({
+  status: 429,
+  body: { error: "Too many requests. Slow down and retry.", code: "rate_limited" },
+  headers: retryAfter === undefined ? {} : { "retry-after": retryAfter },
+});
+
+test("a 429 waits for Retry-After, then tries again", async () => {
+  const { fetch, calls } = stubFetch(LIMITED("1"), { body: { id: "1" } });
+  const started = performance.now();
+  const result = await makeClient(fetch).user.profile({ username: "a" });
+  const elapsed = performance.now() - started;
+
+  assert.deepEqual(result, { id: "1" });
+  assert.equal(calls.length, 2);
+  assert.ok(elapsed >= 950, `waited only ${elapsed} ms`);
+  assert.ok(elapsed < 2500, `waited ${elapsed} ms`);
+  // The second try is the same call.
+  assert.equal(calls[1]!.url, calls[0]!.url);
+  assert.deepEqual(calls[1]!.init.headers, calls[0]!.init.headers);
+});
+
+test("a 429 is retried up to maxRetries (2 by default), then thrown", async () => {
+  const { fetch, calls } = stubFetch(LIMITED("0"));
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(calls.length, 3);
+  assert.ok(err instanceof StoriesFlyError);
+  assert.equal(err.code, "rate_limited");
+  assert.equal(err.status, 429);
+  assert.equal(err.retryAfterMs, 0);
+});
+
+test("maxRetries: 0 turns retries off, and a call can override the client", async () => {
+  const off = stubFetch(LIMITED("0"));
+  await assert.rejects(makeClient(off.fetch, { maxRetries: 0 }).user.profile({ username: "a" }), { code: "rate_limited" });
+  assert.equal(off.calls.length, 1);
+
+  const five = stubFetch(LIMITED("0"));
+  await assert.rejects(makeClient(five.fetch, { maxRetries: 0 }).user.profile({ username: "a" }, { maxRetries: 4 }), { code: "rate_limited" });
+  assert.equal(five.calls.length, 5);
+
+  const none = stubFetch(LIMITED("0"));
+  await assert.rejects(makeClient(none.fetch).user.profile({ username: "a" }, { maxRetries: 0 }), { code: "rate_limited" });
+  assert.equal(none.calls.length, 1);
+});
+
+test("a 429 with no Retry-After still retries, after a short wait", async () => {
+  const { fetch, calls } = stubFetch(LIMITED(undefined), { body: { id: "1" } });
+  const started = performance.now();
+  await makeClient(fetch).user.profile({ username: "a" });
+  assert.equal(calls.length, 2);
+  assert.ok(performance.now() - started >= 450);
+});
+
+test("a Retry-After that is an HTTP date is read", async () => {
+  const soon = new Date(Date.now() + 1500).toUTCString();
+  const { fetch } = stubFetch(LIMITED(soon));
+  const err = (await makeClient(fetch, { maxRetries: 0 }).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.ok(err.retryAfterMs !== null && err.retryAfterMs > 0 && err.retryAfterMs <= 1500, String(err.retryAfterMs));
+});
+
+test("a Retry-After longer than the cap is not waited out: the call fails at once", async () => {
+  const { fetch, calls } = stubFetch(LIMITED("3600"));
+  const started = performance.now();
+  const err = (await makeClient(fetch).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(calls.length, 1);
+  assert.equal(err.code, "rate_limited");
+  assert.equal(err.retryAfterMs, 3_600_000);
+  assert.ok(performance.now() - started < 500);
+});
+
+test("402 credits_exhausted is never retried", async () => {
+  const { fetch, calls } = stubFetch(
+    { status: 402, body: { error: "No credits left. Top up your API balance to continue.", code: "credits_exhausted" }, headers: { "retry-after": "0" } },
+    { body: { id: "1" } },
+  );
+  const err = (await makeClient(fetch, { maxRetries: 5 }).user.profile({ username: "a" }).catch((e: unknown) => e)) as StoriesFlyError;
+  assert.equal(calls.length, 1);
+  assert.equal(err.code, "credits_exhausted");
+  assert.equal(err.status, 402);
+});
+
+test("only 429 is retried: 400, 401, 403, 404, 500 and 503 are thrown at the first answer", async () => {
+  for (const status of [400, 401, 403, 404, 500, 503]) {
+    const { fetch, calls } = stubFetch({ status, body: { error: "x", code: "internal_error" }, headers: { "retry-after": "0" } }, { body: {} });
+    await assert.rejects(makeClient(fetch, { maxRetries: 3 }).user.profile({ username: "a" }), { status });
+    assert.equal(calls.length, 1, `status ${status} was retried`);
   }
 });
 
-test("no Content-Type is sent on requests without a body", async () => {
-  const { fetch, calls } = stubFetch({ body: {} });
-
-  await client(fetch).getProfile("instagram");
-
-  assert.equal(calls[0]?.headers["Content-Type"], undefined);
-});
-
-test("the bearer token is sent only to the outbound-analytics endpoint", async () => {
-  const { fetch, calls } = stubFetch({ body: {} });
-  const sf = client(fetch, { bearerToken: "jwt.token.value" });
-
-  await sf.getProfile("instagram");
-  await sf.getOutboundEngagement("instagram");
-
-  assert.equal(calls[0]?.headers["Authorization"], undefined);
-  assert.equal(calls[1]?.headers["Authorization"], "Bearer jwt.token.value");
-  // The key still rides along; the handler simply ignores it.
-  assert.equal(calls[1]?.headers["X-Api-Key"], "sf_live_test_key");
-});
-
-/* -------------------------------------------------------------------------- */
-/* Query-string building                                                       */
-/* -------------------------------------------------------------------------- */
-
-test("buildQuery drops undefined and null, and encodes values", () => {
-  assert.equal(buildQuery({}), "");
-  assert.equal(buildQuery({ a: undefined, b: null }), "");
-  assert.equal(buildQuery({ page: 1, limit: 50 }), "?page=1&limit=50");
-  assert.equal(buildQuery({ username: "a b&c" }), "?username=a+b%26c");
-  assert.equal(buildQuery({ days: 0, flag: false }), "?days=0&flag=false");
-});
-
-test("optional params are omitted from the URL when not supplied", async () => {
-  const { fetch, calls } = stubFetch({ body: {} });
-  const sf = client(fetch);
-
-  // getOutboundEngagement refuses to send without a session JWT, so this one
-  // case needs a client that carries one.
-  const withJwt = client(fetch, { bearerToken: "jwt_test" });
-
-  await sf.getTrackerEvents();
-  await sf.getTrackerEvents({ page: 2 });
-  await sf.getTrackerEvents({ page: 2, limit: 50 });
-  await withJwt.getOutboundEngagement("example");
-  await withJwt.getOutboundEngagement("example", { days: 7 });
-  await sf.checkShadowban("example");
-  await sf.checkShadowban("example", { locale: "tr" });
-
-  assert.deepEqual(
-    calls.map((c) => c.url.replace("https://storiesfly.com", "")),
-    [
-      "/api/tracker",
-      "/api/tracker?page=2",
-      "/api/tracker?page=2&limit=50",
-      "/api/analytics/outbound?username=example",
-      "/api/analytics/outbound?username=example&days=7",
-      "/api/analytics/shadowban?username=example",
-      "/api/analytics/shadowban?username=example&locale=tr",
-    ]
-  );
-});
-
-test("getHighlights passes the reel id through untouched", async () => {
-  const { fetch, calls } = stubFetch({ body: { items: [] } });
-
-  await client(fetch).getHighlights("highlight:17912345678901234");
-
-  assert.equal(
-    calls[0]?.url,
-    "https://storiesfly.com/api/highlights?id=highlight%3A17912345678901234"
-  );
-});
-
-/* -------------------------------------------------------------------------- */
-/* Error mapping                                                               */
-/* -------------------------------------------------------------------------- */
-
-test("a non-2xx JSON response becomes a StoriesFlyError carrying status and body", async () => {
-  const { fetch } = stubFetch({ status: 401, body: { error: "Invalid or revoked API key" } });
-
-  const err = await client(fetch)
-    .getProfile("instagram")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.equal(err.name, "StoriesFlyError");
-  assert.equal(err.status, 401);
-  assert.deepEqual(err.body, { error: "Invalid or revoked API key" });
-  assert.equal(err.method, "GET");
-  assert.equal(err.url, "https://storiesfly.com/api/profile?username=instagram");
-  assert.match(err.message, /401: Invalid or revoked API key/);
-  assert.equal(err.isRateLimited, false);
-  assert.equal(err.requiresUpgrade, false);
-});
-
-test("429 surfaces the rate-limit headers the handler sets", async () => {
-  const { fetch } = stubFetch({
-    status: 429,
-    body: {
-      error: "Daily limit reached. Upgrade for unlimited access.",
-      upgrade: true,
-      limit: 500,
-      used: 500,
-      retryAfterSec: 3600,
-    },
-    headers: {
-      "retry-after": "3600",
-      "x-ratelimit-limit": "500",
-      "x-ratelimit-remaining": "0",
-      "x-ratelimit-used": "500",
-    },
-  });
-
-  const err = await client(fetch)
-    .getStories("instagram")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.equal(err.status, 429);
-  assert.equal(err.isRateLimited, true);
-  assert.equal(err.requiresUpgrade, true);
-  assert.deepEqual(err.rateLimit, { limit: 500, remaining: 0, used: 500, retryAfterSec: 3600 });
-  assert.equal(err.retryAfterSec, 3600);
-});
-
-test("429 without headers still reports retryAfterSec from the body", async () => {
-  const { fetch } = stubFetch({
-    status: 429,
-    body: { error: "Rate limit exceeded. Sign in for more access.", retryAfterSec: 3600 },
-  });
-
-  const err = await client(fetch)
-    .getStories("instagram")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.deepEqual(err.rateLimit, { retryAfterSec: 3600 });
-  assert.equal(err.retryAfterSec, 3600);
-});
-
-test("429 with no retry hint at all leaves retryAfterSec undefined", async () => {
-  const { fetch } = stubFetch({
-    status: 429,
-    body: { error: "Daily analysis limit reached. Upgrade for more." },
-  });
-
-  const err = await client(fetch)
-    .checkShadowban("example")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.deepEqual(err.rateLimit, {});
-  assert.equal(err.retryAfterSec, undefined);
-});
-
-test("a non-JSON error body is kept as text", async () => {
-  const { fetch } = stubFetch({
-    status: 502,
-    raw: "Bad Gateway",
-    headers: { "content-type": "text/plain" },
-  });
-
-  const err = await client(fetch)
-    .download("https://cdninstagram.com/a.jpg")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.equal(err.status, 502);
-  assert.equal(err.body, "Bad Gateway");
-  assert.match(err.message, /502: Bad Gateway/);
-});
-
-test("an empty error body leaves body null and the message generic", async () => {
-  const { fetch } = stubFetch({ status: 403 });
-
-  const err = await client(fetch)
-    .listTrackedAccounts()
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof StoriesFlyError);
-  assert.equal(err.body, null);
-  assert.equal(err.message, "StoriesFly API 403");
-});
-
-test("StoriesFlyError is a real Error subclass", async () => {
-  const { fetch } = stubFetch({ status: 404, body: { error: "Not found" } });
-
-  const err = await client(fetch)
-    .getProfile("nope")
-    .then(
-      () => null,
-      (e: unknown) => e
-    );
-
-  assert.ok(err instanceof Error);
-  assert.ok(err instanceof StoriesFlyError);
-  assert.ok(typeof (err as Error).stack === "string");
-});
-
-/* -------------------------------------------------------------------------- */
-/* Bearer-only endpoint                                                        */
-/* -------------------------------------------------------------------------- */
-
-test("getOutboundEngagement fails locally when no session JWT is configured", async () => {
-  const { fetch, calls } = stubFetch({ body: {} });
-  const sf = client(fetch);
-
-  // The handler resolves auth with a Bearer-only helper, so an API key comes
-  // back as a bare 401 the caller cannot diagnose. Fail before the request.
-  assert.throws(
-    () => sf.getOutboundEngagement("example"),
-    (err: unknown) =>
-      err instanceof StoriesFlyError &&
-      err.status === 0 &&
-      /bearerToken/.test(JSON.stringify(err.body))
-  );
-  assert.equal(calls.length, 0, "no request should leave the client");
-});
-
-test("getOutboundEngagement sends Authorization when a session JWT is configured", async () => {
-  const { fetch, calls } = stubFetch({ body: {} });
-  const sf = client(fetch, { bearerToken: "jwt_test" });
-
-  await sf.getOutboundEngagement("example");
-
+test("an abort during the wait before a retry stops the call", async () => {
+  const { fetch, calls } = stubFetch(LIMITED("10"));
+  const controller = new AbortController();
+  const pending = makeClient(fetch).user.profile({ username: "a" }, { signal: controller.signal });
+  setTimeout(() => controller.abort(new Error("enough")), 30);
+  const started = performance.now();
+  await assert.rejects(pending, (err: unknown) => (err as Error).message === "enough");
+  assert.ok(performance.now() - started < 1000);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.headers["Authorization"], "Bearer jwt_test");
-  assert.equal(calls[0]?.headers["X-Api-Key"], "sf_live_test_key");
+});
+
+test("a retry after a 429 does not charge twice in the client's eyes: the final answer's meta is the 200's", async () => {
+  const { fetch } = stubFetch(LIMITED("0"), { body: { id: "1" }, headers: { "x-units-charged": "1", "x-request-id": "req_ok" } });
+  const { meta } = await makeClient(fetch).user.profile({ username: "a" }, { withMeta: true });
+  assert.equal(meta.status, 200);
+  assert.equal(meta.unitsCharged, 1);
+  assert.equal(meta.requestId, "req_ok");
 });

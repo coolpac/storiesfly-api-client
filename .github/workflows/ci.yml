@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '22']
+        node: ['18', '20', '22']
 
     steps:
       - uses: actions/checkout@v4
@@ -31,3 +31,7 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+      - run: npm run openapi:check
+
+      - run: npm run readme:check
