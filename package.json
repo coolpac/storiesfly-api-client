@@ -1,7 +1,7 @@
 {
   "name": "storiesfly",
-  "version": "0.1.0",
-  "description": "TypeScript client for the StoriesFly API: Instagram stories, profiles, highlights, media URLs, shadow ban checks and follower/unfollower tracking.",
+  "version": "1.0.0",
+  "description": "TypeScript client for the StoriesFly API: Instagram profiles, stories, highlights, posts, reels, comments, followers, hashtags, places and search. No Instagram login, pay per request.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,6 +18,7 @@
     "dist",
     "examples",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "sideEffects": false,
@@ -35,26 +36,35 @@
   "keywords": [
     "instagram",
     "instagram-api",
-    "stories",
     "instagram-stories",
-    "unfollowers",
-    "follower-tracker",
-    "instagram-analytics",
-    "shadowban",
-    "telegram-mini-app",
+    "instagram-stories-api",
+    "instagram-data",
+    "instagram-followers",
+    "instagram-posts",
+    "instagram-reels",
+    "instagram-highlights",
+    "instagram-hashtags",
+    "stories",
     "api-client",
+    "openapi",
     "typescript"
   ],
   "scripts": {
     "clean": "rm -rf dist test-build",
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.test.json && node --test test-build/test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run clean && npm run build && npm test",
+    "test": "npm run clean && npm run build && tsc -p tsconfig.test.json && node --test test-build/test/*.test.js",
+    "openapi:sync": "node scripts/openapi.mjs sync",
+    "openapi:check": "node scripts/openapi.mjs check",
+    "readme:sync": "npm run build && node scripts/readme-table.mjs sync",
+    "readme:check": "npm run build && node scripts/readme-table.mjs check",
+    "prepublishOnly": "npm run clean && npm run build && npm test && npm run openapi:check && npm run readme:check",
     "prepack": "npm run clean && npm run build"
   },
   "devDependencies": {
+    "@seriousme/openapi-schema-validator": "^2.11.0",
     "@types/node": "^22.15.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "yaml": "^2.9.1"
   }
 }
