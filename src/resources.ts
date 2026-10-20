@@ -19,7 +19,7 @@ import type {
   LocationPostsPage,
   Place,
   PlacesPage,
-  PostMetrics,
+  Post,
   PostMusic,
   PostCommentsPage,
   PostUsersPage,
@@ -79,7 +79,7 @@ export interface UserResource {
   profile: Endpoint<UserTarget, Profile>;
   /** Instagram's "About this account" panel: country, join month, former usernames. 1 unit. */
   about: Endpoint<UserTarget, ProfileAbout>;
-  /** Posts and reels, newest first, 9 to a page, with likes, comments, views, shares, saves and reposts. 1 unit a page. */
+  /** Posts and reels, newest first, up to 9 to a page, with likes, comments, views, shares, saves and reposts. 1 unit a page. */
   posts: Endpoint<Cur<UserTarget>, UserPostsPage>;
   /** Reels, newest first, with caption, video and counts. 1 unit a page. */
   reels: Endpoint<Cur<UserTarget>, UserPostsPage>;
@@ -91,9 +91,9 @@ export interface UserResource {
   stories: Endpoint<UserTarget, UserStories>;
   /** Highlight ids, titles and covers. Use `highlight.get` for the stories inside one. 1 unit a page. */
   highlights: Endpoint<Cur<UserTarget>, UserHighlightsPage>;
-  /** Followers, 25 to a page. 1 unit a page. */
+  /** Followers, up to 25 to a page. 1 unit a page. */
   followers: Endpoint<Cur<UserTarget>, UsersPage>;
-  /** Accounts followed, 25 to a page. 1 unit a page. */
+  /** Accounts followed, up to 25 to a page. 1 unit a page. */
   following: Endpoint<Cur<UserTarget>, UsersPage>;
   /** Searches the followers by name or username. 1 unit. */
   followersSearch: Endpoint<UserTarget & SearchParams, UsersPage>;
@@ -106,8 +106,8 @@ export interface UserResource {
 }
 
 export interface PostResource {
-  /** The numbers of one post or reel: views, likes, comments, shares, saves, reposts, length and time. Not its media files. 1 unit. */
-  get: Endpoint<PostTarget, PostMetrics>;
+  /** One post or reel in full: links to its pictures and video (one entry in `media` per slide), caption, owner, time, and the numbers. 1 unit. */
+  get: Endpoint<PostTarget, Post>;
   /** The comments on a post. 1 unit a page. */
   comments: Endpoint<Cur<PostTarget>, PostCommentsPage>;
   /** The replies to one comment. Name the post, and the comment with `comment_id`. 1 unit a page. */
@@ -178,7 +178,7 @@ export interface ShopResource {
   products: Endpoint<Cur<{ collection_id: string }>, ShopProductsPage>;
 }
 
-/** `client.resolve`: turns an Instagram link into the thing it points at. 1 unit, or 2 for a share link. */
+/** `client.resolve`: turns an Instagram link into the thing it points at. A post link gives the whole post, as `post.get` does. 1 unit, or 2 for a share link. */
 export type ResolveCall = Endpoint<{ url: string }, Resolved>;
 
 /** `client.account`: plan, price of a unit, balance, free units, and the use of the last 30 days. Free. */

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { API_ERROR_CODES, DEFAULT_BASE_URL, ENDPOINTS, VERSION } from "../src/index.js";
+import { API_ERROR_CODES, DEFAULT_BASE_URL, ENDPOINTS, VERSION, type Post } from "../src/index.js";
 import { makeClient, methodOf, stubFetch } from "./helpers.js";
 
 const root = (file: string) => fileURLToPath(new URL(`../../${file}`, import.meta.url));
@@ -150,6 +150,81 @@ test("the units of the spec: 1 for a data call, 0 for account, and the share-lin
     if (e.method === "account") assert.equal(units, 0);
     else if (e.method === "resolve") assert.equal(units, "1, or 2 for share links");
     else assert.equal(units, 1, e.method);
+  }
+});
+
+test("operation ids are identifiers: letters, digits and underscores, no hyphens, and unique", () => {
+  const ids = specPaths.map((path) => get(path).operationId);
+  for (const id of ids) assert.match(id, /^[A-Za-z_][A-Za-z0-9_]*$/);
+  assert.equal(new Set(ids).size, ids.length, "an operation id is used twice");
+});
+
+test("x-page-size is on paged endpoints only, and the README table shows it", () => {
+  const sized: Record<string, number> = {};
+  for (const e of ENDPOINTS) {
+    const size = get(e.path)["x-page-size"];
+    if (size === undefined) continue;
+    assert.ok(e.paged, `${e.method} has a page size but takes no cursor`);
+    assert.ok(Number.isInteger(size) && size > 0, `${e.method} page size ${size}`);
+    sized[e.method] = size;
+  }
+  // The README names the sizes the spec fixes; if the spec fixes another one, this fails until the README does too.
+  assert.deepEqual(sized, { "user.posts": 9, "user.followers": 25, "user.following": 25 });
+
+  const readme = readText("README.md");
+  for (const e of ENDPOINTS) {
+    const size = get(e.path)["x-page-size"];
+    const row = readme.split("\n").find((line) => line.includes(`| \`GET ${e.path}\` |`));
+    assert.ok(row, `README.md has no row for ${e.path}`);
+    if (size === undefined) assert.ok(!row.includes("up to"), `${e.method}: the spec gives no page size`);
+    else assert.ok(row.includes(`| yes, up to ${size} |`), `${e.method}: README row lacks "yes, up to ${size}"`);
+  }
+});
+
+/** Every key of `Post`. The type makes the compiler fail when a key is missing here or is not on `Post`. */
+const POST_KEYS: { [K in keyof Post]-?: true } = {
+  id: true,
+  shortcode: true,
+  url: true,
+  owner: true,
+  taken_at: true,
+  taken_at_iso: true,
+  caption: true,
+  media_type: true,
+  pinned: true,
+  thumbnail_url: true,
+  media: true,
+  likes: true,
+  comments: true,
+  shares: true,
+  reposts: true,
+  views: true,
+  saves: true,
+  video_duration: true,
+  counts_hidden: true,
+};
+
+const example = (path: string): unknown => get(path).responses["200"]?.content?.["application/json"].example;
+
+test("GET /post returns a whole post: the shape of an item of user.posts, which is the Post type", () => {
+  const post = example("/post") as Record<string, unknown>;
+  const listed = (example("/user/posts") as { posts: Record<string, unknown>[] }).posts[0]!;
+  const keys = Object.keys(POST_KEYS).sort();
+
+  assert.deepEqual(Object.keys(post).sort(), keys);
+  assert.deepEqual(Object.keys(listed).sort(), keys);
+
+  const media = (post["media"] as Record<string, unknown>[])[0]!;
+  assert.deepEqual(Object.keys(media).sort(), ["height", "id", "image_url", "type", "video_duration", "video_url", "width"]);
+});
+
+test("every other list of posts carries the same post shape", () => {
+  const keys = Object.keys(POST_KEYS).sort();
+  for (const path of ["/user/reels", "/user/tagged", "/user/pinned", "/user/reposts", "/hashtag/posts", "/location/posts", "/search/reels", "/search/top"]) {
+    const body = example(path) as { posts?: Record<string, unknown>[] };
+    const first = body.posts?.[0];
+    assert.ok(first, `${path} example has no post`);
+    assert.deepEqual(Object.keys(first).sort(), keys, path);
   }
 });
 

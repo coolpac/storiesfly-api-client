@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { StoriesFly, type ApiResult, type Profile, type UserPostsPage, type UsersPage } from "../src/index.js";
+import { StoriesFly, type ApiResult, type Post, type Profile, type UserPostsPage, type UsersPage } from "../src/index.js";
 
 /**
  * Nothing here runs. `tsc` checks it when the tests are built: every call below
@@ -26,7 +26,7 @@ async function typeChecks(client: StoriesFly, signal: AbortSignal): Promise<void
   await client.user.suggested({ username: "instagram" });
 
   // post
-  await client.post.get({ url: "https://www.instagram.com/p/DcyLOLIEdy7/" });
+  const post: Post = await client.post.get({ url: "https://www.instagram.com/p/DcyLOLIEdy7/" });
   await client.post.get({ code: "DcyLOLIEdy7" });
   await client.post.get({ id: "3977290773452414139" });
   await client.post.comments({ code: "DcyLOLIEdy7", cursor: "c1.x" });
@@ -59,13 +59,23 @@ async function typeChecks(client: StoriesFly, signal: AbortSignal): Promise<void
   await client.shop.products({ collection_id: "curated-1-2", cursor: "c1.x" });
   const resolved = await client.resolve({ url: "https://www.instagram.com/s/abc" });
   if (resolved.type === "story") resolved.story.media_url;
-  if (resolved.type === "post") resolved.likes;
+  if (resolved.type === "post") {
+    // A post link gives the whole post, the same type as `post.get`.
+    const whole: Post = { ...resolved };
+    resolved.media[0]?.video_url;
+    resolved.caption;
+    whole.shortcode;
+  }
   const account = await client.account();
   account.balance_usd.toFixed(2);
 
   // the body types carry the fields of the API
   profile.followers;
   posts.posts[0]?.media[0]?.video_url;
+  post.media[0]?.image_url;
+  post.caption;
+  const listed: Post | undefined = posts.posts[0];
+  void listed;
   followers.users[0]?.is_private;
   followers.next_cursor;
 

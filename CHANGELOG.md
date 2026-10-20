@@ -10,17 +10,18 @@ A rewrite for StoriesFly API v1 (`https://storiesfly.com/api/v1`). This release 
 - `client.paginate(method, params, { maxPages, signal, withMeta })`: an async iterator that follows `next_cursor` until `has_more` is `false`.
 - `{ withMeta: true }` on every call and on `paginate`: resolves to `{ data, meta }`, where `meta` holds `requestId`, `unitsCharged`, `balanceRemaining`, `freeUnitsRemaining`, `rateLimitLimit` and `rateLimitRemaining` from the response headers.
 - Types for every answer (`snake_case`, `null` for a missing value) and for the parameters of every call. A call that sends both `username` and `id`, or neither, does not compile.
+- `post.get`, and `resolve` for a post link, return the whole post: `media` with the picture and video links (one entry per slide of a carousel), caption, owner, time and the counts. The type is `Post`, the same as an item of every list of posts.
 - `StoriesFlyError` with `status`, `code`, `requestId`, `retryAfterMs`, `fields`, `linkUrl` and `meta`. The codes are the API's (`bad_request`, `unauthorized`, `telegram_required`, `private_account`, `not_found`, `rate_limited`, `credits_exhausted`, `upstream_unavailable`, `internal_error`, `unknown_endpoint`), plus `timeout`, `network_error` and `invalid_response` set by the client. `API_ERROR_CODES` lists them.
 - A `429` is retried up to `maxRetries` times (default 2), after the `Retry-After` the API sends. A `402` is never retried.
 - Options `timeoutMs` (default 60000) and `maxRetries`, and per-call `signal`, `timeoutMs` and `maxRetries`.
 - `openapi.json`, the spec of API v1, and `openapi.yaml`, the same document in YAML. `npm run openapi:check` validates both and checks that they match.
-- Examples: stories of an account, followers with `paginate`, and the numbers of a post.
+- Examples: stories of an account, followers with `paginate`, and a post with its media links and numbers.
 
 ### Changed
 
 - The default `baseUrl` is `https://storiesfly.com/api/v1`.
 - Answers keep the API's `snake_case` names (`full_name`, `is_private`, `taken_at`) and are not renamed to camelCase.
-- The README method table is generated from the spec.
+- The README method table is generated from the spec. Its `Paged` column shows the page size where the spec gives one (`x-page-size`: 9 for `user.posts`, 25 for `user.followers` and `user.following`).
 
 ### Removed
 

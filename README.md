@@ -44,6 +44,17 @@ Things to know:
 - Field names are `snake_case`, as the API sends them. A value the answer does not carry is `null`. It is never `0` or `""`.
 - Media links in answers are signed Instagram CDN links. They expire within days, so download what you need soon.
 
+A post, with the links to its pictures and video:
+
+```ts
+const post = await client.post.get({ url: "https://www.instagram.com/p/DcyLOLIEdy7/" });
+
+console.log(post.caption, post.likes);
+for (const item of post.media) {
+  console.log(item.type, item.video_url ?? item.image_url); // one item per slide of a carousel
+}
+```
+
 ### Options
 
 ```ts
@@ -72,7 +83,7 @@ for await (const page of client.paginate(client.user.followers, { username: "ins
 - `paginate` takes the method itself (`client.user.followers`), its parameters, and options: `maxPages`, `signal` and `withMeta`. A `cursor` in the parameters starts the walk from a page you already have.
 - Only methods that take `cursor` can be paginated, and the compiler refuses the rest. The `Paged` column of the [methods table](#methods) marks them, and `ENDPOINTS` (exported) has a `paged` flag on each.
 - To page by hand, pass `next_cursor` back as `cursor` and keep every other parameter the same. A cursor is opaque. A cursor the API did not return gives `bad_request`.
-- Page size follows Instagram: `user.posts` returns up to 9 items, `user.followers` and `user.following` up to 25, and the rest vary.
+- Page size follows Instagram and varies by endpoint. The spec fixes it for three: `user.posts` returns up to 9 items a page, `user.followers` and `user.following` up to 25. The `Paged` column of the [methods table](#methods) shows the size wherever the spec gives one.
 
 ## What a call cost: response meta
 
@@ -204,7 +215,7 @@ Parameters, in short:
 - `story.get` and `highlight.get` take `{ url }` or `{ id }`.
 - `hashtag.posts` takes `name`, `sort` (`top`, `recent` or `reels`; keep it the same from page to page) and `cursor`. `location.posts` takes `id`, `sort` (`top` or `recent`) and `cursor`.
 - `location.search` takes `q`, or `lat` and `lng`. The `search.*` calls take `q`, 1 to 100 characters.
-- `post.get` returns the numbers of a post, not its media files. Media links come with the lists that carry posts: `user.posts`, `user.reels`, `hashtag.posts` and the like.
+- `post.get` returns the whole post: `media` (the links to its pictures and video, one entry per slide of a carousel), caption, owner, time, and the numbers. It is the same shape as an item of `user.posts`, `user.reels`, `hashtag.posts` and the other lists of posts, and `resolve` returns it for a post link.
 
 ## Docs
 
@@ -212,7 +223,7 @@ Parameters, in short:
 - OpenAPI 3.1 spec: <https://storiesfly.com/openapi.json> (this repository holds a copy as [`openapi.json`](openapi.json) and [`openapi.yaml`](openapi.yaml))
 - API changelog: <https://storiesfly.com/developers/changelog>
 - Changelog of this package: [CHANGELOG.md](CHANGELOG.md)
-- Examples: [`stories.mjs`](examples/stories.mjs) (stories of an account), [`followers.mjs`](examples/followers.mjs) (followers with `paginate`) and [`post-metrics.mjs`](examples/post-metrics.mjs) (the numbers of a post). Run them with `STORIESFLY_API_KEY=your_key node examples/stories.mjs instagram`.
+- Examples: [`stories.mjs`](examples/stories.mjs) (stories of an account), [`followers.mjs`](examples/followers.mjs) (followers with `paginate`) and [`post.mjs`](examples/post.mjs) (a post with its media links and numbers). Run them with `STORIESFLY_API_KEY=your_key node examples/stories.mjs instagram`.
 
 ## Migrating from 0.x
 
@@ -223,8 +234,8 @@ Parameters, in short:
 | `getStories(username)` | `user.stories({ username })`. It returns `{ user, stories }`. The profile and the highlights are separate calls (`user.profile`, `user.highlights`), and you pay for each. |
 | `getProfile(username)` | `user.profile({ username })`. It also gives `id`, `bio`, `verified` and `external_url`. |
 | `getHighlights(id)` | `highlight.get({ id })`, with every story in the highlight. `user.highlights` lists the highlights of an account. |
-| `getMedia(url)` | `post.get({ url })`. It returns the numbers of the post (likes, comments, views, shares, saves, reposts), not its media files. Media links come with `user.posts`, `user.reels` and other lists. |
-| `download(url)` | No replacement. The links in the answers are CDN links: download the file from the link in your own code. |
+| `getMedia(url)` | `post.get({ url })`. It returns the whole post: `media` holds the picture and video links (`image_url`, `video_url`, one entry per slide of a carousel), with the caption, owner, time and the counts. |
+| `download(url)` | No replacement. `post.get` gives the media links, and they are CDN links: download the file from the link in your own code. |
 | `getTrackerEvents`, `listTrackedAccounts`, `addTrackedAccount`, `removeTrackedAccount`, `checkShadowban`, `getOutboundEngagement` | Not part of API v1, so not in 1.0. |
 
 What else changed:

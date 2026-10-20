@@ -44,6 +44,11 @@ export interface MediaItem {
   video_duration: number | null;
 }
 
+/**
+ * One post or reel, in full. The same shape is returned by `post.get`, by `resolve`
+ * for a post link, and for every item of a list of posts (`user.posts`, `user.reels`,
+ * `hashtag.posts` and the rest).
+ */
 export interface Post {
   id: string;
   /** The part of the link after `/p/` or `/reel/`. */
@@ -72,25 +77,6 @@ export interface Post {
   saves: number | null;
   video_duration: number | null;
   /** The author hid like and view counts, so the numbers above may be absent or partial. */
-  counts_hidden: boolean;
-}
-
-/** What `post.get` returns: the numbers of one post, without its media. */
-export interface PostMetrics {
-  id: string;
-  shortcode: string;
-  url: string;
-  owner: UserRef | null;
-  media_type: MediaType;
-  taken_at: number | null;
-  taken_at_iso: string | null;
-  views: number | null;
-  likes: number | null;
-  comments: number | null;
-  shares: number | null;
-  saves: number | null;
-  reposts: number | null;
-  video_duration: number | null;
   counts_hidden: boolean;
 }
 
@@ -309,9 +295,9 @@ export interface SearchPostsPage extends PageInfo {
   posts: Post[];
 }
 
-/** What `resolve` returns. `type` says which kind of thing the link points at. */
+/** What `resolve` returns. `type` says which kind of thing the link points at. A post link gives the whole `Post`. */
 export type Resolved =
-  | ({ type: "post" } & PostMetrics)
+  | ({ type: "post" } & Post)
   | ({ type: "story" } & StoryResult)
   | ({ type: "highlight" } & HighlightDetail)
   | ({ type: "user" } & Profile);
