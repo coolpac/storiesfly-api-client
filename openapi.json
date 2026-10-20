@@ -3,7 +3,7 @@
   "info": {
     "title": "StoriesFly API",
     "version": "1.0.0",
-    "description": "Public Instagram data over HTTP: 38 data endpoints for profiles, posts, reels, stories, highlights, comments, followers, hashtags, places and search, and a free `account` call that shows your balance.\n\nSend your key in the X-Api-Key header. Every call costs units (x-units on each operation, 0 for the account call). Free units are spent before your balance.\n\nA call that finds nothing, or reaches a private account, is charged. A call that fails on our side or at the data source is refunded.\n\nLists come a page at a time: pass the next_cursor of one page back as cursor to get the next. Page size follows Instagram and varies by endpoint, except where an operation sets x-page-size.\n\nPrices and rate limits for each level: https://storiesfly.com/developers/pricing"
+    "description": "Public Instagram data over HTTP: 38 data endpoints for profiles, posts, reels, stories, highlights, comments, followers, hashtags, places and search, and a free `account` call that shows your balance.\n\nSend your key in the X-Api-Key header. Every call costs units (x-units on each operation, 0 for the account call). Free units are spent before your balance.\n\nA call that finds nothing, or reaches a private account, is charged. A call that fails on our side is refunded.\n\nLists come a page at a time: pass the next_cursor of one page back as cursor to get the next. Page size follows Instagram and varies by endpoint, except where an operation sets x-page-size.\n\nPrices and rate limits for each level: https://storiesfly.com/developers/pricing"
   },
   "servers": [
     {
@@ -2020,8 +2020,8 @@
         "tags": [
           "Post"
         ],
-        "summary": "Views, likes, comments, shares, saves and reposts of one post",
-        "description": "The numbers of one post or reel: views, likes, comments, shares, saves, reposts, length and time. Name it with url, code or id.",
+        "summary": "One post: media links, caption, views, likes, comments, shares, saves and reposts",
+        "description": "One post or reel in full: links to its pictures and video (one entry per slide of a carousel), caption, owner, time, and the numbers: views, likes, comments, shares, saves, reposts and length. Name it with url, code or id.",
         "parameters": [
           {
             "name": "url",
@@ -2091,15 +2091,38 @@
                     "id": "7719696",
                     "username": "arianagrande"
                   },
-                  "media_type": "carousel",
                   "taken_at": 1788350029,
                   "taken_at_iso": "2026-09-02T11:53:49.000Z",
-                  "views": null,
+                  "caption": "eternal sunshine tour, 2026 ｡˚ ♡ ∞\nthank you and \ni love you always",
+                  "media_type": "carousel",
+                  "pinned": true,
+                  "thumbnail_url": "https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/791738291_18778422601039697_8733025742258971552_n.jpg",
+                  "media": [
+                    {
+                      "id": "3977286630464928056",
+                      "type": "image",
+                      "image_url": "https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/791738291_18778422601039697_8733025742258971552_n.jpg",
+                      "video_url": null,
+                      "width": 2730,
+                      "height": 1820,
+                      "video_duration": null
+                    },
+                    {
+                      "id": "3977286646931788566",
+                      "type": "image",
+                      "image_url": "https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/791296384_18778422625039697_6800978965548942666_n.jpg",
+                      "video_url": null,
+                      "width": 1666,
+                      "height": 1111,
+                      "video_duration": null
+                    }
+                  ],
                   "likes": 1185299,
                   "comments": 70,
                   "shares": null,
-                  "saves": null,
                   "reposts": 56891,
+                  "views": null,
+                  "saves": null,
                   "video_duration": null,
                   "counts_hidden": false
                 }

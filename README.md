@@ -158,19 +158,19 @@ Each method is a call of API v1. This table is generated from the OpenAPI spec (
 | --- | --- | --- | --- | --- |
 | `client.user.profile()` | `GET /user/profile` | 1 |  | Profile with verified badge, bio, link and counts |
 | `client.user.about()` | `GET /user/about` | 1 |  | Country, join month and former usernames |
-| `client.user.posts()` | `GET /user/posts` | 1 | yes | Posts with likes, comments, views, shares, saves and reposts |
+| `client.user.posts()` | `GET /user/posts` | 1 | yes, up to 9 | Posts with likes, comments, views, shares, saves and reposts |
 | `client.user.reels()` | `GET /user/reels` | 1 | yes | Reels with captions, video and play counts |
 | `client.user.tagged()` | `GET /user/tagged` | 1 | yes | Posts the account is tagged in |
 | `client.user.pinned()` | `GET /user/pinned` | 1 |  | Posts pinned to the top of the profile |
 | `client.user.stories()` | `GET /user/stories` | 1 |  | Stories live now, with the length of each video |
 | `client.user.highlights()` | `GET /user/highlights` | 1 | yes | Highlight covers and titles |
-| `client.user.followers()` | `GET /user/followers` | 1 | yes | Followers, page by page |
-| `client.user.following()` | `GET /user/following` | 1 | yes | Accounts followed, page by page |
+| `client.user.followers()` | `GET /user/followers` | 1 | yes, up to 25 | Followers, page by page |
+| `client.user.following()` | `GET /user/following` | 1 | yes, up to 25 | Accounts followed, page by page |
 | `client.user.followersSearch()` | `GET /user/followers/search` | 1 |  | Find someone among the followers |
 | `client.user.followingSearch()` | `GET /user/following/search` | 1 |  | Find someone among the accounts followed |
 | `client.user.reposts()` | `GET /user/reposts` | 1 | yes | Posts and reels the account reposted |
 | `client.user.suggested()` | `GET /user/suggested` | 1 |  | Similar accounts Instagram suggests |
-| `client.post.get()` | `GET /post` | 1 |  | Views, likes, comments, shares, saves and reposts of one post |
+| `client.post.get()` | `GET /post` | 1 |  | One post: media links, caption, views, likes, comments, shares, saves and reposts |
 | `client.post.comments()` | `GET /post/comments` | 1 | yes | Comments with likes and reply counts |
 | `client.post.commentReplies()` | `GET /post/comment-replies` | 1 | yes | Replies to a comment |
 | `client.post.likers()` | `GET /post/likers` | 1 |  | Accounts that liked the post |

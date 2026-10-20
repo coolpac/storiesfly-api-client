@@ -19,13 +19,20 @@ const specPath = fileURLToPath(new URL("openapi.json", root));
 const readmePath = fileURLToPath(new URL("README.md", root));
 const endpointsUrl = new URL("dist/endpoints.js", root).href;
 
+/** The Paged cell: "yes", with the page size when the spec gives one (`x-page-size`). */
+function paged(endpoint, operation) {
+  if (!endpoint.paged) return "";
+  const size = operation["x-page-size"];
+  return size === undefined ? "yes" : `yes, up to ${size}`;
+}
+
 /** The table, as Markdown, in the order of the client's method table. */
 export function renderTable(spec, endpoints) {
   const rows = endpoints.map((e) => {
     const op = spec.paths[e.path]?.get;
     if (!op) throw new Error(`the spec has no GET ${e.path} (method ${e.method})`);
     const units = String(op["x-units"]);
-    return `| \`client.${e.method}()\` | \`GET ${e.path}\` | ${units} | ${e.paged ? "yes" : ""} | ${op.summary} |`;
+    return `| \`client.${e.method}()\` | \`GET ${e.path}\` | ${units} | ${paged(e, op)} | ${op.summary} |`;
   });
   return ["| Call | Endpoint | Units | Paged | Returns |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
