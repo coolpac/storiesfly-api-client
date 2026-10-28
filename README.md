@@ -181,7 +181,7 @@ try {
 
 Other fields: `fields` (with `bad_request`, the names of the refused parameters), `linkUrl` (with `telegram_required`, the link that links your account to Telegram), `url` (the URL called; it holds no key) and `body` (the parsed error body).
 
-You are charged for answers: a `200`, `not_found` and `private_account`. A wrong parameter, a rate limit and an empty balance cost nothing, and a failure on our side or at the data source is refunded. `err.meta.unitsCharged` and `X-Units-Charged` say what a call took.
+You are charged for answers: a `200`, `not_found` and `private_account`. A wrong parameter, a rate limit and an empty balance cost nothing, and a failure on our side is refunded. `err.meta.unitsCharged` and `X-Units-Charged` say what a call took.
 
 | Status | `code` | Charged | When |
 | --- | --- | --- | --- |
@@ -195,7 +195,7 @@ You are charged for answers: a `200`, `not_found` and `private_account`. A wrong
 | 404 | `unknown_endpoint` | no | No such endpoint. |
 | 429 | `rate_limited` | no | Too many requests per second. |
 | 500 | `internal_error` | refunded | A fault on our side. |
-| 503 | `upstream_unavailable` | refunded | The data source is down for now. Try again shortly. |
+| 503 | `upstream_unavailable` | refunded | The data is not available right now. Try again shortly. |
 
 The client adds three codes of its own, with `status` 0 when no answer came: `timeout` (no answer within `timeoutMs`), `network_error` (`fetch` failed; the error has the `cause`) and `invalid_response` (an answer that is not in the documented shape, such as a proxy's error page; the `status` and the body are kept).
 
