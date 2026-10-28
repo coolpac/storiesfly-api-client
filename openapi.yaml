@@ -5,13 +5,13 @@ info:
   title: StoriesFly API
   version: 1.0.0
   description: |-
-    Public Instagram data over HTTP: 38 data endpoints for profiles, posts, reels, stories, highlights, comments, followers, hashtags, places and search, and a free `account` call that shows your balance.
+    Public Instagram and TikTok data over HTTP: 46 data endpoints for profiles, posts, reels, stories, highlights, comments, followers, hashtags, places and search, TikTok videos without the watermark, profiles, videos, stories, followers, following and reposts, a download endpoint for the files of a post at a fixed low price (x-price), and a free `account` call that shows your balance.
 
-    Send your key in the X-Api-Key header. Every call costs units (x-units on each operation, 0 for the account call). Free units are spent before your balance.
+    Send your key in the X-Api-Key header. One API, one key, one balance, two ways a call is priced: a data call costs units at your level's rate (x-units on each operation, 0 for the account call), and an operation with x-price is sold at that fixed price at every level. Free units are spent before your balance; a call with x-price uses one free unit.
 
     A call that finds nothing, or reaches a private account, is charged. A call that fails on our side is refunded.
 
-    Lists come a page at a time: pass the next_cursor of one page back as cursor to get the next. Page size follows Instagram and varies by endpoint, except where an operation sets x-page-size.
+    Lists come a page at a time: pass the next_cursor of one page back as cursor to get the next. Page size follows Instagram and varies by endpoint, except where an operation sets x-page-size. On the TikTok operations it follows TikTok.
 
     Prices and rate limits for each level: https://storiesfly.com/developers/pricing
 servers:
@@ -28,6 +28,8 @@ tags:
   - name: Hashtags
   - name: Places
   - name: Search
+  - name: TikTok
+  - name: Download
   - name: Other
 paths:
   /user/profile:
@@ -881,7 +883,7 @@ paths:
       tags:
         - User
       summary: Followers, page by page
-      description: The accounts that follow an account, a page at a time. Pass next_cursor back as cursor for the next page. Up to 25 items per page.
+      description: The accounts that follow an account, a page at a time. Pass next_cursor back as cursor for the next page. For a verified account Instagram shows only about 50 followers and no next page. Up to 25 items per page.
       parameters:
         - name: username
           in: query
@@ -3223,6 +3225,662 @@ paths:
           $ref: "#/components/responses/Error500"
         "503":
           $ref: "#/components/responses/Error503"
+  /tiktok/video:
+    get:
+      operationId: tiktok_video
+      tags:
+        - TikTok
+      summary: One TikTok video without the watermark, with views, likes, comments and shares
+      description: "One TikTok video or photo post by its link (short vm.tiktok.com links too): the video without the watermark, the soundtrack, a photo post's pictures, caption, hashtags, author, time, and views, likes, comments and shares. A number is null when it is not exact. File links are temporary: download right away."
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: "Link to one TikTok video or photo post: tiktok.com/@user/video/<id>, /photo/<id>, or a vm.tiktok.com, vt.tiktok.com or tiktok.com/t/ short link."
+          schema:
+            type: string
+            maxLength: 700
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                id: "7697307919943060767"
+                url: https://www.tiktok.com/@khaby.lame/video/7697307919943060767
+                author:
+                  username: khaby.lame
+                taken_at: 1792169181
+                taken_at_iso: 2026-10-16T16:46:21.000Z
+                caption: "I guess is time to retire #learnfromkhaby #comedy 🥊"
+                hashtags:
+                  - learnfromkhaby
+                  - comedy
+                media_type: video
+                thumbnail_url: https://p16-common-sign.tiktokcdn-us.com/tos-useast8-p-0068-tx2/oQbHQmFfa5VY3NlkEGDAQT00RzqAqBOETlEafj~tplv-tiktokx-cropcenter-q:300:400:q70.jpeg
+                video_url: https://v16-notes.tiktokcdn-us.com/2be808f08705c24ce524dc1c6be75bfd/6ad86eac/video/tos/useast8/tos-useast8-ve-0068c001-tx2/oUNaVlmzDIfimS0TAHFgVVRYNBfQqDEQExA5…
+                video_url_sd: https://v16m.tiktokcdn-us.com/9a847fe287ca9832a70c225bb36490c7/6ad86eac/video/tos/useast8/tos-useast8-pve-0068-tx2/okAtBQJDE2EBABOobPVaUIr8ztS8Vii6QRmMZ/
+                audio_url: https://v16-ies-music.tiktokcdn-us.com/9faf1ca1cfd2c177d0d52a67236dfd58/6ae154d5/video/tos/useast8/tos-useast8-v-27dcd7-tx2/o0lYCTaBi4zgW3APV1PCJGRIGuUvvti6VAM…
+                images: []
+                video_duration: 9
+                views: 3305439
+                likes: 273186
+                comments: 6525
+                shares: 31470
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/profile:
+    get:
+      operationId: tiktok_user_profile
+      tags:
+        - TikTok
+      summary: TikTok profile with followers, following, likes and video count
+      description: "A TikTok account's profile by username: name, bio, picture, followers, following, total likes, video count, the verified badge and the ids. A number is null when it is not exact."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                id: null
+                sec_uid: null
+                username: khaby.lame
+                full_name: Khabane lame
+                bio: Se vuoi ridere sei nel posto giusto😎 If u wanna laugh u r in the right place😎
+                profile_pic_url: https://p16-common.tiktokcdn.com/tos-useast8-avt-0068-tx2/08987e23b94057953fd4f1738694bf5f~tplv-tiktokx-cropcenter:720:720.webp
+                followers: 162979750
+                following: null
+                likes: null
+                videos: null
+                verified: true
+                is_private: null
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/videos:
+    get:
+      operationId: tiktok_user_videos
+      tags:
+        - TikTok
+      summary: A TikTok account's videos with numbers, page by page; file links on page one
+      description: "A TikTok account's videos, newest first, a page at a time: each with its caption, time, cover and numbers. A number or a time is null when it is not exact. The first page also has a link to each video file. A later page has none (video_url is null): get the file with tiktok/video or download, by the video's url. Pass next_cursor back as cursor for the next page. Page size follows TikTok and varies by endpoint."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+        - name: cursor
+          in: query
+          required: false
+          description: The next_cursor of the page before. Leave it out for the first page.
+          schema:
+            type: string
+            maxLength: 4100
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                user:
+                  username: khaby.lame
+                videos:
+                  - id: "7697307919943060767"
+                    url: https://www.tiktok.com/@khaby.lame/video/7697307919943060767
+                    author:
+                      username: khaby.lame
+                    taken_at: 1792169181
+                    taken_at_iso: 2026-10-16T16:46:21.000Z
+                    caption: "I guess is time to retire #learnfromkhaby #comedy 🥊"
+                    hashtags:
+                      - learnfromkhaby
+                      - comedy
+                    media_type: video
+                    thumbnail_url: null
+                    video_url: https://v19e.tiktokcdn.com/67a0c3597f8d0415651f75b5494b0798/6ad96aab/video/tos/alisg/tos-alisg-ve-37c799-sg/okAtBQJDE2EBABOobPVaUIr8ztS8Vii6QRmMZ/
+                    video_url_sd: null
+                    audio_url: null
+                    images: []
+                    video_duration: 10
+                    views: 3305006
+                    likes: 273179
+                    comments: 6524
+                    shares: 31470
+                  - id: "7694335322922044703"
+                    url: https://www.tiktok.com/@khaby.lame/video/7694335322922044703
+                    author:
+                      username: khaby.lame
+                    taken_at: 1791477076
+                    taken_at_iso: 2026-10-08T16:31:16.000Z
+                    caption: "Was the ball out, or was it just my imagination? 🤨#learnfromkhaby #comedy"
+                    hashtags:
+                      - learnfromkhaby
+                      - comedy
+                    media_type: video
+                    thumbnail_url: null
+                    video_url: https://v19e.tiktokcdn.com/425aa2ad5c79b175d3870eb2819014a8/6ad96ac0/video/tos/alisg/tos-alisg-ve-37c799-sg/oEmjGeelIIxqIXxkjgVALC6HQxj4AfTSTISIkK/
+                    video_url_sd: null
+                    audio_url: null
+                    images: []
+                    video_duration: 31
+                    views: 6300899
+                    likes: 659883
+                    comments: 12141
+                    shares: 20223
+                next_cursor: c1.ryg6VkAgkE2BcPyGM0q6ADwLG1KAGWvXyxXcleap6rtdnm6USXXD4rRRujLUjticHxS2vixe2jbdlG4LggGvIE1ISp6sYLXI6XWcb66UIrM_RMPDKCUhQylnCgNoMsPrfzM
+                has_more: true
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/stories:
+    get:
+      operationId: tiktok_user_stories
+      tags:
+        - TikTok
+      summary: TikTok stories live now
+      description: "The stories a TikTok account has up now, by username: each story's picture or video, cover, time and length. An empty list when it has none."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                user:
+                  username: khaby.lame
+                stories: []
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/followers:
+    get:
+      operationId: tiktok_user_followers
+      tags:
+        - TikTok
+      summary: TikTok followers, page by page; a hidden list answers an empty page
+      description: "The accounts that follow a TikTok account, a page at a time: each with its username, ids, name, picture, verified badge, whether it is private, and its followers, following, likes and video count. A number is null when it is not exact. Pass next_cursor back as cursor for the next page. An account that hides the list answers an empty page with hidden set to true. Page size follows TikTok and varies by endpoint."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+        - name: cursor
+          in: query
+          required: false
+          description: The next_cursor of the page before. Leave it out for the first page.
+          schema:
+            type: string
+            maxLength: 4100
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                user:
+                  username: khaby.lame
+                users:
+                  - id: "6800000000000007919"
+                    sec_uid: MS4wLjABAAAAfan1sec
+                    username: fan.1
+                    full_name: Fan 1
+                    profile_pic_url: https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/000000000000000000000000000003d1~tplv-tiktokx-cropcenter:100:100.jpeg
+                    verified: true
+                    is_private: false
+                    followers: 1200
+                    following: 81
+                    likes: 45000
+                    videos: 10
+                  - id: "6800000000000015838"
+                    sec_uid: MS4wLjABAAAAfan2sec
+                    username: fan.2
+                    full_name: Fan 2
+                    profile_pic_url: https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/000000000000000000000000000007a2~tplv-tiktokx-cropcenter:100:100.jpeg
+                    verified: false
+                    is_private: true
+                    followers: 4800
+                    following: 82
+                    likes: 90000
+                    videos: 20
+                next_cursor: c1.ryg6VkAgkE2BcPyGM0q6ADwLG1KAGWvXyxXcleap6rtdnm6USXXD4rRRujLUjticHxS2vixe2jbdlG4LggGvIE1ISp6sYLXI6XWcb66UIrM_RMPDKCUhQylnCgNoMsPrfzM
+                has_more: true
+                total: 4321
+                hidden: false
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/following:
+    get:
+      operationId: tiktok_user_following
+      tags:
+        - TikTok
+      summary: TikTok accounts followed, page by page; a hidden list answers an empty page
+      description: The accounts a TikTok account follows, a page at a time, with the same fields as its followers. Pass next_cursor back as cursor for the next page. An account that hides the list answers an empty page with hidden set to true. Page size follows TikTok and varies by endpoint.
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+        - name: cursor
+          in: query
+          required: false
+          description: The next_cursor of the page before. Leave it out for the first page.
+          schema:
+            type: string
+            maxLength: 4100
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                user:
+                  username: khaby.lame
+                users:
+                  - id: "6900000000000104729"
+                    sec_uid: MS4wLjABAAAAcreator1sec
+                    username: creator.1
+                    full_name: Creator 1
+                    profile_pic_url: https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/9000000000000000000000000000003d1~tplv-tiktokx-cropcenter:100:100.jpeg
+                    verified: true
+                    is_private: false
+                    followers: 1200
+                    following: 81
+                    likes: 45000
+                    videos: 10
+                  - id: "6900000000000209458"
+                    sec_uid: MS4wLjABAAAAcreator2sec
+                    username: creator.2
+                    full_name: Creator 2
+                    profile_pic_url: https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/9000000000000000000000000000007a2~tplv-tiktokx-cropcenter:100:100.jpeg
+                    verified: false
+                    is_private: true
+                    followers: 4800
+                    following: 82
+                    likes: 90000
+                    videos: 20
+                next_cursor: c1.ryg6VkAgkE2BcPyGM0q6ADwLG1KAGWvXyxXcleap6rtdnm6USXXD4rRRujLUjticHxS2vixe2jbdlG4LggGvIE1ISp6sYLXI6XWcb66UIrM_RMPDKCUhQylnCgNoMsPrfzM
+                has_more: true
+                total: 82
+                hidden: false
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /tiktok/user/reposts:
+    get:
+      operationId: tiktok_user_reposts
+      tags:
+        - TikTok
+      summary: Videos a TikTok account reposted, page by page, with their authors
+      description: "The videos a TikTok account has reposted, newest repost first, a page at a time: each video's author, caption, cover, file link, and its views and likes. The time is when the author posted the video, as TikTok gives no time for the repost. Comments and shares are null. An empty list when the account has no reposts or hides them. Pass next_cursor back as cursor for the next page. Page size follows TikTok and varies by endpoint."
+      parameters:
+        - name: username
+          in: query
+          required: true
+          description: TikTok username, or a profile link. A leading @ is ignored.
+          schema:
+            type: string
+            maxLength: 200
+        - name: cursor
+          in: query
+          required: false
+          description: The next_cursor of the page before. Leave it out for the first page.
+          schema:
+            type: string
+            maxLength: 4100
+      x-units: 1
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                user:
+                  username: khaby.lame
+                videos:
+                  - id: "7500000000000000001"
+                    url: https://www.tiktok.com/@maker.1/video/7500000000000000001
+                    author:
+                      username: maker.1
+                    taken_at: 1790856000
+                    taken_at_iso: 2026-10-01T12:00:00.000Z
+                    caption: "Reposted clip 1 #duet #fun"
+                    hashtags:
+                      - duet
+                      - fun
+                    media_type: video
+                    thumbnail_url: https://p16-sign-va.tiktokcdn.com/obj/tos-maliva-p-0068/00000000000000000000000000000011?x-expires=1793000000&x-signature=r1
+                    video_url: https://v16m-default.tiktokcdn.com/00000000000000000000000000000001/video/tos/alisg/tos-alisg-pve-0037/00000000000000000000000000000001/?mime_type=video_mp4
+                    video_url_sd: null
+                    audio_url: null
+                    images: []
+                    video_duration: 21
+                    views: 1500000
+                    likes: 120000
+                    comments: null
+                    shares: null
+                  - id: "7500000000000000002"
+                    url: https://www.tiktok.com/@maker.2/photo/7500000000000000002
+                    author:
+                      username: maker.2
+                    taken_at: 1790942400
+                    taken_at_iso: 2026-10-02T12:00:00.000Z
+                    caption: "Reposted clip 2 #duet #fun"
+                    hashtags:
+                      - duet
+                      - fun
+                    media_type: photo
+                    thumbnail_url: https://p16-sign-va.tiktokcdn.com/obj/tos-maliva-p-0068/00000000000000000000000000000022?x-expires=1793000000&x-signature=r2
+                    video_url: null
+                    video_url_sd: null
+                    audio_url: null
+                    images:
+                      - https://p16-sign-va.tiktokcdn.com/tos-maliva-i-photo/0000000000000000000000000000000a~tplv-photomode-image.jpeg?x-expires=1793000000&x-signature=p0
+                      - https://p16-sign-va.tiktokcdn.com/tos-maliva-i-photo/0000000000000000000000000000000b~tplv-photomode-image.jpeg?x-expires=1793000000&x-signature=p1
+                    video_duration: null
+                    views: 3000000
+                    likes: 240000
+                    comments: null
+                    shares: null
+                next_cursor: c1.ryg6VkAgkE2BcPyGM0q6ADwLG1KAGWvXyxXcleap6rtdnm6USXXD4rRRujLUjticHxS2vixe2jbdlG4LggGvIE1ISp6sYLXI6XWcb66UIrM_RMPDKCUhQylnCgNoMsPrfzM
+                has_more: true
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
+  /download:
+    get:
+      operationId: download_media
+      tags:
+        - Download
+      summary: Files of an Instagram post or reel, or a TikTok video, by link
+      description: "The files of one post by its link: an Instagram post, reel or IGTV, or a TikTok video or photo post (short links too). The video (TikTok's without the watermark), every picture of a carousel or photo post, the cover and, for TikTok, the soundtrack and caption. Files only, no metrics: use post or tiktok/video for those. File links are temporary: download right away."
+      parameters:
+        - name: url
+          in: query
+          required: true
+          description: An Instagram post, reel or IGTV link, or a TikTok video or photo link (short links too).
+          schema:
+            type: string
+            maxLength: 700
+      x-units: 1
+      x-price: "Fixed: $0.20 per 1,000 for a TikTok link, $0.50 per 1,000 for an Instagram link"
+      responses:
+        "200":
+          description: "The answer. The example is a real one, shortened: long lists and texts are cut."
+          headers:
+            X-Units-Charged:
+              $ref: "#/components/headers/X-Units-Charged"
+            X-Balance-Remaining:
+              $ref: "#/components/headers/X-Balance-Remaining"
+            X-Free-Units-Remaining:
+              $ref: "#/components/headers/X-Free-Units-Remaining"
+            X-RateLimit-Limit:
+              $ref: "#/components/headers/X-RateLimit-Limit"
+            X-RateLimit-Remaining:
+              $ref: "#/components/headers/X-RateLimit-Remaining"
+            X-Request-Id:
+              $ref: "#/components/headers/X-Request-Id"
+          content:
+            application/json:
+              schema:
+                type: object
+              example:
+                platform: instagram
+                id: DdY3MUJCfby
+                url: https://www.instagram.com/p/DdY3MUJCfby/
+                author: arianagrande
+                caption: null
+                media_type: video
+                thumbnail_url: https://scontent.cdninstagram.com/v/t51.82787-15/813966136_18783396925039697_6406007525826130925_n.jpg
+                media:
+                  - type: video
+                    url: https://instagram.fbeg3-2.fna.fbcdn.net/o1/v/t2/f2/m86/AQPHnjf83HZ9PR2G28elI5BWiebhxAmJxbUPxxIecjIu2AxjcEHA6WoTngqdgKKomsQIGeIYxUjVgFzMRcMB4yqxuvGRfQCLsvGsZV8.…
+                    quality: null
+                    thumbnail_url: https://scontent.cdninstagram.com/v/t51.82787-15/813966136_18783396925039697_6406007525826130925_n.jpg
+                audio_url: null
+        "400":
+          $ref: "#/components/responses/Error400"
+        "401":
+          $ref: "#/components/responses/Error401"
+        "402":
+          $ref: "#/components/responses/Error402"
+        "403":
+          $ref: "#/components/responses/Error403"
+        "404":
+          $ref: "#/components/responses/Error404"
+        "429":
+          $ref: "#/components/responses/Error429"
+        "500":
+          $ref: "#/components/responses/Error500"
+        "503":
+          $ref: "#/components/responses/Error503"
   /track:
     get:
       operationId: audio_track
@@ -3528,7 +4186,7 @@ paths:
       tags:
         - Other
       summary: Your plan, balance, free units and use
-      description: Your plan, the price of one unit, your balance and free units, the next step of the ladder and your use of the last 30 days by endpoint. Costs nothing.
+      description: Your plan, the price of one data request and of a download, your balance and free units, the next step of the ladder and your use of the last 30 days by endpoint. Costs nothing.
       parameters: []
       x-units: 0
       responses:
@@ -3554,6 +4212,9 @@ paths:
               example:
                 tier: START
                 unit_price_usd: 0.0015
+                download_price_usd:
+                  tiktok: 0.0002
+                  instagram: 0.0005
                 balance_usd: 9.238
                 free_units: 0
                 lifetime_topup_usd: 10
@@ -3831,7 +4492,7 @@ components:
                 error: Internal error. Retry shortly.
                 code: internal_error
     Error503:
-      description: "- `upstream_unavailable`: The data source is temporarily unavailable. Retry shortly."
+      description: "- `upstream_unavailable`: The call failed on our side and was refunded. Retry shortly."
       headers:
         X-Request-Id:
           $ref: "#/components/headers/X-Request-Id"
@@ -3859,5 +4520,5 @@ components:
             upstream_unavailable:
               summary: upstream_unavailable
               value:
-                error: The data source is temporarily unavailable. Retry shortly.
+                error: The call failed on our side and was refunded. Retry shortly.
                 code: upstream_unavailable

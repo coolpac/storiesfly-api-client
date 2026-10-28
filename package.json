@@ -1,7 +1,7 @@
 {
   "name": "storiesfly",
-  "version": "1.0.0",
-  "description": "TypeScript client for the StoriesFly API: Instagram profiles, stories, highlights, posts, reels, comments, followers, hashtags, places and search. No Instagram login, pay per request.",
+  "version": "1.1.0",
+  "description": "TypeScript client for the StoriesFly API: Instagram and TikTok profiles, stories, posts, reels, videos without the watermark, comments, followers and following lists, reposts, hashtags, places and search, plus a download call. Also available in ChatGPT and Claude through MCP. No login, pay per request.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -47,7 +47,16 @@
     "stories",
     "api-client",
     "openapi",
-    "typescript"
+    "typescript",
+    "tiktok",
+    "tiktok-api",
+    "tiktok-followers",
+    "tiktok-downloader",
+    "tiktok-videos",
+    "tiktok-stories",
+    "mcp",
+    "chatgpt",
+    "claude"
   ],
   "scripts": {
     "clean": "rm -rf dist test-build",

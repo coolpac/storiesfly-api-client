@@ -14,6 +14,8 @@ import type {
   ResolveCall,
   SearchResource,
   ShopResource,
+  TikTokResource,
+  DownloadCall,
   StoryResource,
   TrackResource,
   UserResource,
@@ -222,6 +224,8 @@ export class StoriesFly {
   readonly search: SearchResource;
   readonly track: TrackResource;
   readonly shop: ShopResource;
+  readonly tiktok: TikTokResource;
+  readonly download: DownloadCall;
   readonly resolve: ResolveCall;
   readonly account: AccountCall;
 
@@ -299,6 +303,18 @@ export class StoriesFly {
     };
     this.track = { get: e("track.get") };
     this.shop = { storefront: e("shop.storefront"), products: e("shop.products") };
+    this.tiktok = {
+      video: e("tiktok.video"),
+      user: {
+        profile: e("tiktok.user.profile"),
+        videos: e("tiktok.user.videos"),
+        stories: e("tiktok.user.stories"),
+        followers: e("tiktok.user.followers"),
+        following: e("tiktok.user.following"),
+        reposts: e("tiktok.user.reposts"),
+      },
+    };
+    this.download = e("download");
     this.resolve = e("resolve");
 
     const accountPath = pathOf("account");

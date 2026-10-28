@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0 - 2026-10-28
+
+### Added
+
+- TikTok: `client.tiktok.video()`, `client.tiktok.user.profile()`, `.videos()`, `.stories()`, `.followers()`, `.following()` and `.reposts()`. `videos`, `followers`, `following` and `reposts` take `cursor` and work with `client.paginate`.
+- `client.download({ url })`: the file links of an Instagram post, reel or IGTV, or a TikTok video or photo post, at a fixed price per call.
+- Types `TikTokVideo`, `TikTokProfile`, `TikTokUserShort`, `TikTokVideosPage`, `TikTokUsersPage`, `TikTokUserStories`, `TikTokStory`, `Download` and `DownloadFile`.
+- `download_price_usd` on the `account` answer.
+- README sections for TikTok, download, the MCP server (ChatGPT and Claude) and a short FAQ.
+
+### Changed
+
+- `openapi.json` and `openapi.yaml` are the spec as served today: 47 paths, 46 data endpoints and `account`. The README method table is regenerated.
+- `download` is a method again: in 1.0 it was removed, and in 1.1 it returns file links.
+
 ## 1.0.0
 
 A rewrite for StoriesFly API v1 (`https://storiesfly.com/api/v1`). This release breaks the 0.x API; see "Migrating from 0.x" in the README.

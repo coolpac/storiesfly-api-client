@@ -53,6 +53,14 @@ export const ENDPOINTS = [
   { method: "resolve", path: "/resolve", paged: false },
   { method: "shop.storefront", path: "/shop/storefront", paged: false },
   { method: "shop.products", path: "/shop/products", paged: true },
+  { method: "tiktok.video", path: "/tiktok/video", paged: false },
+  { method: "tiktok.user.profile", path: "/tiktok/user/profile", paged: false },
+  { method: "tiktok.user.videos", path: "/tiktok/user/videos", paged: true },
+  { method: "tiktok.user.stories", path: "/tiktok/user/stories", paged: false },
+  { method: "tiktok.user.followers", path: "/tiktok/user/followers", paged: true },
+  { method: "tiktok.user.following", path: "/tiktok/user/following", paged: true },
+  { method: "tiktok.user.reposts", path: "/tiktok/user/reposts", paged: true },
+  { method: "download", path: "/download", paged: false },
   { method: "account", path: "/account", paged: false },
 ] as const satisfies readonly EndpointInfo[];
 

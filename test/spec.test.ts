@@ -44,9 +44,9 @@ const get = (path: string): Operation => {
 /* Method table against the spec                                               */
 /* -------------------------------------------------------------------------- */
 
-test("the spec is OpenAPI 3.1 with 39 paths: 38 data endpoints and account", () => {
+test("the spec is OpenAPI 3.1 with 47 paths: 46 data endpoints and account", () => {
   assert.equal(spec.openapi, "3.1.0");
-  assert.equal(specPaths.length, 39);
+  assert.equal(specPaths.length, 47);
   assert.ok(specPaths.includes("/account"));
 });
 
@@ -75,7 +75,12 @@ test("the client has no call that is not in the table", () => {
   for (const [name, value] of Object.entries(client)) {
     if (typeof value === "function") found.push(name);
     else if (value !== null && typeof value === "object") {
-      for (const [inner, fn] of Object.entries(value)) if (typeof fn === "function") found.push(`${name}.${inner}`);
+      for (const [inner, fn] of Object.entries(value)) {
+        if (typeof fn === "function") found.push(`${name}.${inner}`);
+        else if (fn !== null && typeof fn === "object") {
+          for (const [leaf, f] of Object.entries(fn)) if (typeof f === "function") found.push(`${name}.${inner}.${leaf}`);
+        }
+      }
     }
   }
   // `paginate` is a method of the class, not an own property, so it is not in `found`.
@@ -149,6 +154,7 @@ test("the units of the spec: 1 for a data call, 0 for account, and the share-lin
     const units = get(e.path)["x-units"];
     if (e.method === "account") assert.equal(units, 0);
     else if (e.method === "resolve") assert.equal(units, "1, or 2 for share links");
+    else if (e.method === "download") assert.equal(units, 1);
     else assert.equal(units, 1, e.method);
   }
 });
@@ -264,7 +270,7 @@ test("the README table has a row for every path of the spec, with its units", ()
 test("the version in the code is the version in package.json", () => {
   const pkg = JSON.parse(readText("package.json")) as { version: string };
   assert.equal(VERSION, pkg.version);
-  assert.equal(pkg.version, "1.0.0");
+  assert.equal(pkg.version, "1.1.0");
 });
 
 test("the changelog has an entry for this version", () => {

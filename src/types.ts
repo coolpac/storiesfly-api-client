@@ -336,6 +336,8 @@ export interface Account {
   next_tier: { tier: AccountTier; remaining_usd: number } | null;
   /** The highest level open today. */
   tier_cap: AccountTier;
+  /** What one `download` call costs, in US dollars, by platform. */
+  download_price_usd: { instagram: number; tiktok: number };
   /** Your use of the last 30 days, busiest endpoint first. */
   usage_30d: { endpoint: string; calls: number; spent_usd: number }[];
 }
@@ -366,4 +368,132 @@ export interface ResponseMeta {
 export interface ApiResult<T> {
   data: T;
   meta: ResponseMeta;
+}
+
+/* -------------------------------------------------------------------------- */
+/* TikTok and download                                                         */
+/* -------------------------------------------------------------------------- */
+
+/** A TikTok account named by username. */
+export interface TikTokUserRef {
+  username: string;
+}
+
+/**
+ * One TikTok video or photo post. Returned by `tiktok.video`, and for every item of
+ * `tiktok.user.videos` and `tiktok.user.reposts`. A number is `null` when it is not exact.
+ * File links are temporary: download right away.
+ */
+export interface TikTokVideo {
+  id: string;
+  url: string;
+  author: TikTokUserRef;
+  taken_at: number | null;
+  taken_at_iso: string | null;
+  caption: string | null;
+  hashtags: string[];
+  /** `photo` for a photo post, `video` otherwise. */
+  media_type: "video" | "photo";
+  thumbnail_url: string | null;
+  /** The video without the watermark. Null on a later page of `tiktok.user.videos`. */
+  video_url: string | null;
+  video_url_sd: string | null;
+  audio_url: string | null;
+  /** The pictures of a photo post. Empty for a video. */
+  images: string[];
+  /** Seconds. */
+  video_duration: number | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+}
+
+/** What `tiktok.user.profile` returns. A number is `null` when it is not exact. */
+export interface TikTokProfile {
+  id: string | null;
+  sec_uid: string | null;
+  username: string;
+  full_name: string | null;
+  bio: string | null;
+  profile_pic_url: string | null;
+  followers: number | null;
+  following: number | null;
+  /** Total likes received. */
+  likes: number | null;
+  /** The number of videos. */
+  videos: number | null;
+  verified: boolean | null;
+  is_private: boolean | null;
+}
+
+/** An account inside a TikTok followers or following list. */
+export interface TikTokUserShort {
+  id: string | null;
+  sec_uid: string | null;
+  username: string | null;
+  full_name: string | null;
+  profile_pic_url: string | null;
+  verified: boolean | null;
+  is_private: boolean | null;
+  followers: number | null;
+  following: number | null;
+  likes: number | null;
+  videos: number | null;
+}
+
+/** `tiktok.user.videos` and `tiktok.user.reposts`. */
+export interface TikTokVideosPage extends PageInfo {
+  user: TikTokUserRef;
+  videos: TikTokVideo[];
+}
+
+/** `tiktok.user.followers` and `tiktok.user.following`. */
+export interface TikTokUsersPage extends PageInfo {
+  user: TikTokUserRef;
+  users: TikTokUserShort[];
+  /** The size of the whole list, when known. */
+  total?: number | null;
+  /** True when the account hides the list: the page is then empty. */
+  hidden: boolean;
+}
+
+/** One TikTok story that is up now. */
+export interface TikTokStory {
+  id?: string | null;
+  url?: string | null;
+  taken_at?: number | null;
+  taken_at_iso?: string | null;
+  media_type?: "photo" | "video" | null;
+  media_url?: string | null;
+  thumbnail_url?: string | null;
+  /** Seconds. */
+  video_duration?: number | null;
+}
+
+export interface TikTokUserStories {
+  user: TikTokUserRef;
+  /** Empty when the account has none up. */
+  stories: TikTokStory[];
+}
+
+/** One file of a `download` answer. */
+export interface DownloadFile {
+  type: "image" | "video" | "audio";
+  url: string;
+  quality: string | null;
+  thumbnail_url: string | null;
+}
+
+/** What `download` returns: the files of one Instagram or TikTok post. Files only, no metrics. */
+export interface Download {
+  platform: "instagram" | "tiktok";
+  id: string;
+  url: string;
+  author: string | null;
+  caption: string | null;
+  media_type: string;
+  thumbnail_url: string | null;
+  media: DownloadFile[];
+  audio_url: string | null;
 }

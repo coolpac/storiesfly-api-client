@@ -32,6 +32,12 @@ import type {
   SearchUsersPage,
   ShopProductsPage,
   Storefront,
+  Download,
+  TikTokProfile,
+  TikTokUserStories,
+  TikTokUsersPage,
+  TikTokVideo,
+  TikTokVideosPage,
   StoryResult,
   Track,
   UserHighlightsPage,
@@ -177,6 +183,30 @@ export interface ShopResource {
   /** The products of one shop collection (`collection_id` from `storefront`). 1 unit a page. */
   products: Endpoint<Cur<{ collection_id: string }>, ShopProductsPage>;
 }
+
+export interface TikTokUserResource {
+  /** A TikTok profile: name, bio, picture, followers, following, total likes, video count, verified badge. 1 unit. */
+  profile: Endpoint<{ username: string }, TikTokProfile>;
+  /** An account's videos, newest first, with numbers. File links are on page one only. 1 unit a page. */
+  videos: Endpoint<Cur<{ username: string }>, TikTokVideosPage>;
+  /** The stories up now. Empty when there are none. 1 unit. */
+  stories: Endpoint<{ username: string }, TikTokUserStories>;
+  /** Followers, page by page. A hidden list answers an empty page with `hidden: true`. 1 unit a page. */
+  followers: Endpoint<Cur<{ username: string }>, TikTokUsersPage>;
+  /** Accounts followed, page by page. A hidden list answers an empty page with `hidden: true`. 1 unit a page. */
+  following: Endpoint<Cur<{ username: string }>, TikTokUsersPage>;
+  /** Videos the account reposted, with their authors. 1 unit a page. */
+  reposts: Endpoint<Cur<{ username: string }>, TikTokVideosPage>;
+}
+
+export interface TikTokResource {
+  /** One video or photo post by link (short links too): the video without the watermark, soundtrack, caption, author and numbers. 1 unit. */
+  video: Endpoint<{ url: string }, TikTokVideo>;
+  user: TikTokUserResource;
+}
+
+/** `client.download`: the files of an Instagram post, reel or IGTV, or a TikTok video, by link. Fixed price per call. */
+export type DownloadCall = Endpoint<{ url: string }, Download>;
 
 /** `client.resolve`: turns an Instagram link into the thing it points at. A post link gives the whole post, as `post.get` does. 1 unit, or 2 for a share link. */
 export type ResolveCall = Endpoint<{ url: string }, Resolved>;
